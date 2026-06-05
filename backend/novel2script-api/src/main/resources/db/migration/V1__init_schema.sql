@@ -1,13 +1,7 @@
 -- ============================================================
--- Novel2Script MySQL Schema v2.0
+-- V1: 初始化核心表结构 (10 张表)
 -- 引擎: InnoDB | 字符集: utf8mb4 | 排序: utf8mb4_unicode_ci
 -- ============================================================
-
-CREATE DATABASE IF NOT EXISTS novel2script
-    DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_unicode_ci;
-
-USE novel2script;
 
 -- ----------------------------
 -- 1. 小说表
@@ -31,7 +25,7 @@ CREATE TABLE IF NOT EXISTS novels (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='小说表';
 
 -- ----------------------------
--- 2. 章节表
+-- 2. 章节表 (FK -> novels)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS chapters (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -42,7 +36,7 @@ CREATE TABLE IF NOT EXISTS chapters (
     char_count      INT NOT NULL DEFAULT 0 COMMENT '字数',
     start_offset    BIGINT NOT NULL DEFAULT 0 COMMENT '在原文中的起始偏移',
     end_offset      BIGINT NOT NULL DEFAULT 0 COMMENT '在原文中的结束偏移',
-    embedding_id   VARCHAR(200) COMMENT 'Milvus 中的嵌入 ID',
+    embedding_id    VARCHAR(200) COMMENT 'Milvus 中的嵌入 ID',
     status          VARCHAR(20) NOT NULL DEFAULT 'RAW'
                         COMMENT '状态: RAW/PARSED/EMBEDDED',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -54,7 +48,7 @@ CREATE TABLE IF NOT EXISTS chapters (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='章节表';
 
 -- ----------------------------
--- 3. 剧本表
+-- 3. 剧本表 (FK -> novels)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS scripts (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -80,7 +74,7 @@ CREATE TABLE IF NOT EXISTS scripts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='剧本表';
 
 -- ----------------------------
--- 4. 角色表
+-- 4. 角色表 (FK -> scripts)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS characters (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -108,7 +102,7 @@ CREATE TABLE IF NOT EXISTS characters (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色表';
 
 -- ----------------------------
--- 5. 剧情事件表
+-- 5. 剧情事件表 (FK -> scripts)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS plot_events (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -130,7 +124,7 @@ CREATE TABLE IF NOT EXISTS plot_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='剧情事件表';
 
 -- ----------------------------
--- 6. 场景表
+-- 6. 场景表 (FK -> scripts)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS scenes (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -152,7 +146,7 @@ CREATE TABLE IF NOT EXISTS scenes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='场景表';
 
 -- ----------------------------
--- 7. 场景-角色关联表
+-- 7. 场景-角色关联表 (FK -> scenes, characters)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS scene_characters (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -170,7 +164,7 @@ CREATE TABLE IF NOT EXISTS scene_characters (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='场景角色关联表';
 
 -- ----------------------------
--- 8. 对白表
+-- 8. 对白表 (FK -> scenes, characters)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS dialogues (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -193,7 +187,7 @@ CREATE TABLE IF NOT EXISTS dialogues (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='对白表';
 
 -- ----------------------------
--- 9. 动作表
+-- 9. 动作表 (FK -> scenes, characters)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS actions (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -215,7 +209,7 @@ CREATE TABLE IF NOT EXISTS actions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='动作表';
 
 -- ----------------------------
--- 10. 分镜表 (加分项)
+-- 10. 分镜表 (FK -> scenes)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS shots (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -233,49 +227,3 @@ CREATE TABLE IF NOT EXISTS shots (
     CONSTRAINT fk_shots_scene FOREIGN KEY (scene_id)
         REFERENCES scenes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分镜表';
-
--- ----------------------------
--- 11. Prompt 审计表
--- ----------------------------
-CREATE TABLE IF NOT EXISTS prompt_audits (
-    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-    prompt_name     VARCHAR(200) NOT NULL COMMENT 'Prompt 模板名称',
-    prompt_version  VARCHAR(50) NOT NULL COMMENT '版本号',
-    model_name      VARCHAR(100) NOT NULL COMMENT '使用的模型',
-    input_tokens    INT NOT NULL DEFAULT 0 COMMENT '输入 Token 数',
-    output_tokens   INT NOT NULL DEFAULT 0 COMMENT '输出 Token 数',
-    latency_ms      INT NOT NULL DEFAULT 0 COMMENT '响应延迟(毫秒)',
-    retry_count     INT NOT NULL DEFAULT 0 COMMENT '重试次数',
-    is_success      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否成功',
-    error_message   TEXT COMMENT '错误信息',
-    full_prompt     MEDIUMTEXT COMMENT '完整 Prompt (用于调试)',
-    full_response   MEDIUMTEXT COMMENT '完整响应 (用于调试)',
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    INDEX idx_audit_name (prompt_name),
-    INDEX idx_audit_created (created_at),
-    INDEX idx_audit_success (is_success)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Prompt 审计表';
-
--- ----------------------------
--- 12. 工作流执行记录表
--- ----------------------------
-CREATE TABLE IF NOT EXISTS workflow_executions (
-    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-    script_id       BIGINT NOT NULL,
-    workflow_type   VARCHAR(100) NOT NULL COMMENT '工作流类型: FULL_GENERATION/PARTIAL',
-    current_step    VARCHAR(100) COMMENT '当前步骤名称',
-    state           VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-                        COMMENT '状态: PENDING/RUNNING/COMPLETED/FAILED/PAUSED',
-    state_snapshot  JSON COMMENT '状态快照 (可序列化恢复)',
-    error_detail    TEXT COMMENT '错误详情',
-    started_at      DATETIME COMMENT '开始时间',
-    completed_at    DATETIME COMMENT '完成时间',
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    INDEX idx_workflow_script (script_id),
-    INDEX idx_workflow_state (state),
-    INDEX idx_workflow_type (workflow_type),
-    CONSTRAINT fk_workflow_script FOREIGN KEY (script_id)
-        REFERENCES scripts(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流执行记录表';

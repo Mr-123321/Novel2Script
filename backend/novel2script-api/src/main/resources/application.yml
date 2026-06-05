@@ -6,7 +6,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/novel2script?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     username: root
-    password: ${MYSQL_PASSWORD:111111}
+    password: ${MYSQL_PASSWORD:Wyk040824}
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: true
