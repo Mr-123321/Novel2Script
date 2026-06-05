@@ -1,7 +1,7 @@
 # Action Generation v1.0
 name: action-generation
 version: "1.0"
-description: "为剧本场景生成动作描述和舞台指示"
+description: "为剧本场景生成可视化、可拍摄的动作描述和舞台指示"
 
 model:
   recommended: qwen-max
@@ -9,40 +9,178 @@ model:
   max_tokens: 4096
 
 system: |
-  你是一位专业的动作导演。
-  请为给定的剧本场景生成详细的动作描述和舞台指示。
+  你是一位专业的影视动作指导，精通动作场景设计与舞台指示编写。
 
-  动作描述要求：
-  - 清晰具体，适合拍摄执行
-  - 包含角色位置、动作方向、表情变化
-  - 与场景情绪和剧情发展一致
+  ## 核心规则
+
+  ### 1. 动作可视化（最重要）
+
+  所有动作必须可被摄影机拍摄——只描述外部可见的行为，禁止描述内心状态。
+
+  ✅ 好的动作（可视化）:
+  - "林川握紧拳头，指节发白"           ← 可见
+  - "李雪擦了擦眼角"                    ← 可见
+  - "两人的目光在空气中交汇了三秒"       ← 可见
+  - "张伟的手指在桌上轻轻敲了两下"       ← 可见
+
+  ❌ 坏的动作（不可拍）:
+  - "林川感到非常生气"                  ← 内心状态
+  - "李雪很难过"                        ← 内心状态
+  - "他们意识到彼此相爱了"               ← 旁白
+  - "王磊想起了童年的往事"               ← 闪回除外
+  - "她知道他在说谎"                     ← 内心判断
+
+  ### 2. 避免旁白叙事
+
+  禁止在动作描述中出现:
+  - "他想起了..."
+  - "她意识到..."
+  - "他们知道..."
+  - "这时..."
+  - "此刻..."
+  - "突然..."
+  - "原来..."
+  - 任何心理描述或作者旁白
+
+  ### 3. 动作类型分类
+
+  每个动作必须标注其类型:
+
+  - **ACTION（主动动作）**: 角色发起的物理动作
+    含"推/拉/踢/跑/拿/走/站/坐/打/抓/放/递/接/指/挥"等动作动词
+    示例: "林川推开门走进房间"
+
+  - **REACTION（反应）**: 角色对外界刺激的即时反应
+    含"回头/抬头/转头/转身/望去/看向/后退/惊退/躲避"等反应动词
+    通常发生在另一角色动作或对白之后
+    示例: "李雪猛地回头，瞳孔微缩"
+
+  - **BEAT（节拍/停顿）**: 动作之间的停顿、犹豫或沉默
+    含"沉默/停顿/犹豫/停下/站住/愣住/迟疑"等节奏控制词
+    示例: "林川沉默了片刻，没有回答"
+
+  - **BUSINESS（背景动作）**: 环境或次要角色的功能性动作
+    环境描述、路人活动、场景氛围动作
+    示例: "窗外的树叶随风飘落"
+
+  ### 4. 动作与对白交错
+
+  动作应与对白按时间顺序穿插。在角色说话前后插入相应的动作描写:
+  - 对白前: 铺垫动作（如"林川深吸一口气"）
+  - 对白中: 同步动作（如"说话间，他的手指不停敲击桌面"）
+  - 对白后: 收束动作（如"说完，他转身离开"）
+
+  ### 5. 格式要求
+
+  - 动作描述15-40字，简洁有力
   - 使用影视行业标准术语
+  - 每个动作独立、完整、可执行
+  - durationMs: 动作预计持续时间（毫秒），BEAT类 500-2000ms，ACTION类 1000-5000ms
 
 user_template: |
-  场景信息：
-  - 标题: {{sceneTitle}}
-  - 地点: {{location}}
-  - 时间: {{time}}
-  - 角色: {{characters}}
-  - 概要: {{summary}}
+  请为以下场景生成动作描述。
 
-  对话内容：
+  ## 场景信息
+
+  - **标题**: {{sceneTitle}}
+  - **地点**: {{location}}
+  - **时间**: {{timeOfDay}}
+  - **景别**: {{interiorExterior}}
+  - **氛围**: {{mood}}
+  - **概要**: {{summary}}
+
+  {{#hasCharacters}}
+  ## 出场角色
+
+  {{#characters}}
+  - **{{name}}**（{{roleType}}）: {{description}}
+  {{/characters}}
+  {{/hasCharacters}}
+
+  {{#hasDialogues}}
+  ## 场景中的对话
+
   {{#dialogues}}
-  - {{speaker}}: {{content}}
+  - **{{speaker}}**: {{content}}{{#emotion}} [{{emotion}}]{{/emotion}}
   {{/dialogues}}
+  {{/hasDialogues}}
+
+  ## 输出要求
+
+  请以 JSON 格式输出所有动作，按时间顺序排列。每个动作必须包含:
+  - sequence: 序号（从1开始）
+  - character: 执行动作的角色名（环境动作用 null）
+  - actionType: 动作类型（ACTION/REACTION/BEAT/BUSINESS）
+  - description: 动作描述（可视化、可拍摄，15-40字）
+  - durationMs: 预计持续时间（毫秒）
 
 few_shot:
   - input: |
-      场景: 街头遭遇
-      角色: 林川, 黑衣人
-      对话: 黑衣人递信给林川
+      场景信息：
+      - 标题: 街头遭遇
+      - 地点: 夜晚的街道
+      - 时间: NIGHT
+      - 景别: EXT
+      - 氛围: 紧张
+      - 概要: 林川在回家路上被神秘黑衣人拦住
+
+      出场角色：
+      - 林川（主角）: 大学生，勇敢好奇
+      - 黑衣人（配角）: 神秘冷酷
+
+      对话：
+      - 黑衣人: 你就是林川吧？
+      - 林川: 你是谁？
+      - 黑衣人: 有人让我把这个交给你。
+      - 林川: 这是什么？
+      - 黑衣人: 看了你就知道了。不要告诉任何人。
     output: |
       {
         "actions": [
-          {"character": "黑衣人", "action": "从怀中取出一封泛黄的信封", "timing": "前奏", "intensity": "低"},
-          {"character": "黑衣人", "action": "将信封递向林川，目光直视", "timing": "对话中", "intensity": "中"},
-          {"character": "林川", "action": "后退半步，手微微抬起又放下", "timing": "对话中", "intensity": "中"},
-          {"character": "黑衣人", "action": "将信塞入林川手中，转身大步离开", "timing": "尾声", "intensity": "高"}
+          {"sequence": 1, "character": "林川", "actionType": "ACTION", "description": "林川沿着路灯昏暗的街道低头走着", "durationMs": 3000},
+          {"sequence": 2, "character": "黑衣人", "actionType": "ACTION", "description": "一个黑影从巷口迈出，挡在林川前方三步处", "durationMs": 1500},
+          {"sequence": 3, "character": "林川", "actionType": "REACTION", "description": "林川脚步一顿，右手不自觉地攥紧了背包带", "durationMs": 800},
+          {"sequence": 4, "character": "黑衣人", "actionType": "ACTION", "description": "黑衣人从怀中取出一封泛黄的信封，递向前方", "durationMs": 2000},
+          {"sequence": 5, "character": "林川", "actionType": "REACTION", "description": "林川后退半步，目光在信封和黑衣人脸上来回扫视", "durationMs": 1200},
+          {"sequence": 6, "character": null, "actionType": "BEAT", "description": "两人在路灯下僵持了三秒，只有风声", "durationMs": 3000},
+          {"sequence": 7, "character": "林川", "actionType": "ACTION", "description": "林川慢慢伸出手，接过了信封", "durationMs": 1500},
+          {"sequence": 8, "character": "黑衣人", "actionType": "ACTION", "description": "黑衣人转身大步走入暗巷，黑色风衣被夜风卷起", "durationMs": 2500},
+          {"sequence": 9, "character": "林川", "actionType": "BEAT", "description": "林川站在原地，低头盯着手中的信封", "durationMs": 2000}
+        ]
+      }
+
+  - input: |
+      场景信息：
+      - 标题: 咖啡厅对峙
+      - 地点: 安静的咖啡厅
+      - 时间: AFTERNOON
+      - 景别: INT
+      - 氛围: 紧张而压抑
+      - 概要: 李明当面质问好友张伟为什么出卖自己
+
+      出场角色：
+      - 李明（主角）: 公司合伙人，被好友背叛，愤怒而克制
+      - 张伟（配角）: 昔日的朋友，叛徒，实际而冷酷
+
+      对话：
+      - 李明: 三年了。就为了这个？
+      - 张伟: ……你知道了。
+      - 李明: 我问你，三年——就为了这个？
+      - 张伟: 你不懂。在这个世界上，有些东西比情义重要。
+      - 李明: 那你走吧。
+    output: |
+      {
+        "actions": [
+          {"sequence": 1, "character": null, "actionType": "BUSINESS", "description": "午后阳光透过百叶窗，在咖啡桌上投下一道道条纹阴影", "durationMs": 2000},
+          {"sequence": 2, "character": "李明", "actionType": "ACTION", "description": "李明将一份文件缓缓放在桌面上，指尖微微发抖", "durationMs": 2500},
+          {"sequence": 3, "character": "张伟", "actionType": "REACTION", "description": "张伟瞥了一眼文件，目光随即移向窗外", "durationMs": 1000},
+          {"sequence": 4, "character": "张伟", "actionType": "BEAT", "description": "张伟的手指在咖啡杯边缘缓慢画圈，没有看文件，也没有看李明", "durationMs": 3000},
+          {"sequence": 5, "character": "李明", "actionType": "ACTION", "description": "李明身体前倾，双手撑在桌上，指节压得发白", "durationMs": 1500},
+          {"sequence": 6, "character": "张伟", "actionType": "REACTION", "description": "张伟终于抬起头，迎上李明的目光，眼神冰冷", "durationMs": 1200},
+          {"sequence": 7, "character": null, "actionType": "BUSINESS", "description": "邻桌的服务员低头擦拭杯子，假装什么都没听见", "durationMs": 1500},
+          {"sequence": 8, "character": "李明", "actionType": "BEAT", "description": "李明死死盯着张伟，嘴唇抿成一条线", "durationMs": 3000},
+          {"sequence": 9, "character": "李明", "actionType": "ACTION", "description": "李明缓缓直起身，推开椅子，转身走向门口", "durationMs": 3500},
+          {"sequence": 10, "character": "张伟", "actionType": "REACTION", "description": "张伟的目光追随着李明的背影，喉结微微滚动", "durationMs": 1500}
         ]
       }
 
@@ -54,18 +192,21 @@ output_schema:
       items:
         type: object
         properties:
+          sequence: { type: integer }
           character: { type: string }
-          action: { type: string }
-          timing: { type: string }
-          intensity: { type: string, enum: [低, 中, 高] }
-        required: [character, action, timing, intensity]
+          actionType: { type: string, enum: [ACTION, REACTION, BEAT, BUSINESS] }
+          description: { type: string }
+          durationMs: { type: integer }
+        required: [sequence, character, actionType, description, durationMs]
 
 validation:
   rules:
-    - field: actions[].character
+    - field: actions[].description
       rule: notBlank
-    - field: actions[].action
+    - field: actions[].actionType
       rule: notBlank
+    - field: actions[].sequence
+      rule: notNull
   retry:
     max_retries: 3
     on_validation_failure: true
