@@ -2,6 +2,8 @@ package com.novel2script.infrastructure.persistence.converter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.novel2script.common.enums.SourceReason;
+import com.novel2script.common.enums.TimeOfDay;
 import com.novel2script.domain.model.Scene;
 import com.novel2script.infrastructure.persistence.po.ScenePO;
 import lombok.RequiredArgsConstructor;
@@ -27,12 +29,12 @@ public class SceneConverter {
         po.setSceneNumber(scene.getSceneNumber());
         po.setTitle(scene.getTitle());
         po.setLocation(scene.getLocation());
-        po.setTimeOfDay(scene.getTimeOfDay());
+        po.setTimeOfDay(scene.getTimeOfDay() != null ? scene.getTimeOfDay().name() : null);
         po.setIsInterior(scene.isInterior() ? 1 : 0);
         po.setSummary(scene.getSummary());
         po.setMood(scene.getMood());
         po.setChapterIds(toJson(scene.getChapterIds()));
-        po.setSourceReason(scene.getSourceReason());
+        po.setSourceReason(scene.getSourceReason() != null ? scene.getSourceReason().name() : null);
         po.setCreatedAt(scene.getCreatedAt());
         return po;
     }
@@ -47,12 +49,12 @@ public class SceneConverter {
         scene.setSceneNumber(po.getSceneNumber());
         scene.setTitle(po.getTitle());
         scene.setLocation(po.getLocation());
-        scene.setTimeOfDay(po.getTimeOfDay());
+        scene.setTimeOfDay(TimeOfDay.fromLabel(po.getTimeOfDay()));
         scene.setInterior(po.getIsInterior() != null && po.getIsInterior() == 1);
         scene.setSummary(po.getSummary());
         scene.setMood(po.getMood());
         scene.setChapterIds(fromJson(po.getChapterIds()));
-        scene.setSourceReason(po.getSourceReason());
+        scene.setSourceReason(SourceReason.fromLabel(po.getSourceReason()));
         scene.setCreatedAt(po.getCreatedAt());
         return scene;
     }

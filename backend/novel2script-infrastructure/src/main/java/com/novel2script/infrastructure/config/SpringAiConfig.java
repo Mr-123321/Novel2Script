@@ -1,5 +1,6 @@
 package com.novel2script.infrastructure.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -16,13 +17,13 @@ import java.util.Map;
  * Spring AI multi-model configuration.
  *
  * <p>Creates a {@link ChatModel} bean (and corresponding {@link ChatClient})
- * for every provider listed under {@code spring.ai.providers.*}.
+ * for every provider listed under {@code spring.ai.providers.*} that has a valid API key.
  * Each bean is qualified by the provider name so that {@link AiModelRouter}
  * can select the right model at runtime.
  *
- * <p>The default provider gets the {@link Primary} qualifier so that
- * injection points without an explicit {@code @Qualifier} still work.
+ * <p>Only providers with non-blank API keys will be instantiated.
  */
+@Slf4j
 @Configuration
 @EnableConfigurationProperties(MultiModelProperties.class)
 public class SpringAiConfig {
@@ -36,38 +37,60 @@ public class SpringAiConfig {
     // ── ChatModel beans (one per provider) ───────────────
 
     /**
-     * Build a {@link ChatModel} for every configured provider.
+     * Build a {@link ChatModel} for every configured provider with a valid API key.
      *
-     * @return a map of provider-name → ChatModel
+     * @return a map of provider-name → ChatModel (only providers with API keys)
      */
     @Bean
     public Map<String, ChatModel> chatModels() {
         Map<String, ChatModel> models = new HashMap<>();
 
         multiModelProperties.getProviders().forEach((name, config) -> {
-            MultiModelProperties.ChatOptions opts = config.getChat().getOptions();
+            // Skip providers without API keys
+            if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+                log.debug("Skipping provider '{}' - no API key configured", name);
+                return;
+            }
 
-            // Build OpenAiApi targeting this provider's base URL
-            OpenAiApi api = OpenAiApi.builder()
-                    .baseUrl(config.getBaseUrl())
-                    .apiKey(config.getApiKey())
-                    .build();
+            try {
+                MultiModelProperties.ChatOptions opts = config.getChat().getOptions();
 
-            // Build chat options from YAML config
-            OpenAiChatOptions chatOptions = OpenAiChatOptions.builder()
-                    .model(opts.getModel())
-                    .temperature(opts.getTemperature())
-                    .maxTokens(opts.getMaxTokens())
-                    .build();
+                // Build OpenAiApi targeting this provider's base URL
+                OpenAiApi api = OpenAiApi.builder()
+                        .baseUrl(config.getBaseUrl())
+                        .apiKey(config.getApiKey())
+                        .build();
 
-            OpenAiChatModel chatModel = OpenAiChatModel.builder()
-                    .openAiApi(api)
-                    .defaultOptions(chatOptions)
-                    .build();
+                // Build chat options from YAML config
+                OpenAiChatOptions chatOptions = OpenAiChatOptions.builder()
+                        .model(opts.getModel())
+                        .temperature(opts.getTemperature())
+                        .maxTokens(opts.getMaxTokens())
+                        .build();
 
-            models.put(name, chatModel);
+                OpenAiChatModel chatModel = OpenAiChatModel.builder()
+                        .openAiApi(api)
+                        .defaultOptions(chatOptions)
+                        .build();
+
+                models.put(name, chatModel);
+                log.info("✅ Created ChatModel for provider: {}", name);
+            } catch (Exception e) {
+                log.error("❌ Failed to create ChatModel for provider '{}': {}", name, e.getMessage());
+                throw new IllegalStateException(
+                    "Failed to initialize AI provider '" + name + "'. Please check your configuration.", e);
+            }
         });
 
+        if (models.isEmpty()) {
+            log.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            log.error("❌ No AI providers could be initialized!");
+            log.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            throw new IllegalStateException(
+                "No AI providers are properly configured. Please add at least one provider with a valid API key in application-dev.yml");
+        }
+
+        log.info("📊 Total ChatModels initialized: {}", models.size());
         return models;
     }
 

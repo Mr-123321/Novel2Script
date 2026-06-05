@@ -1,0 +1,107 @@
+# ============================================================================
+# AI Provider 配置示例 - 只需配置一个即可运行
+# ============================================================================
+# 
+# 📌 使用说明：
+# 1. 复制此文件为 application-dev.yml（如果不存在）
+# 2. 至少配置一个 AI Provider 的 API Key
+# 3. 其他 Provider 可以留空或不配置
+# 4. 启动应用时会自动验证配置并给出提示
+#
+# ✅ 推荐配置（选择一个即可）：
+#   - DeepSeek（性价比高，中文支持好）← 默认
+#   - OpenAI GPT-4（质量最好）
+#   - 通义千问（阿里出品）
+#   - Claude（创意写作强）
+# ============================================================================
+
+spring:
+  ai:
+    # 默认使用的 Provider（必须是已配置的 provider 之一）
+    default-provider: deepseek
+    
+    providers:
+      # ──────────────────────────────────────────────────────
+      # 🔥 DeepSeek（推荐 - 默认）
+      # 官网: https://platform.deepseek.com
+      # 价格: 便宜，适合开发测试
+      # ──────────────────────────────────────────────────────
+      deepseek:
+        api-key: sk-your-deepseek-api-key-here  # ← 填入你的 API Key
+        base-url: https://api.deepseek.com
+        chat:
+          options:
+            model: deepseek-chat
+            temperature: 0.7
+            max-tokens: 4096
+
+      # ──────────────────────────────────────────────────────
+      # 💎 OpenAI（可选）
+      # 官网: https://platform.openai.com
+      # 价格: 较贵，质量最好
+      # ──────────────────────────────────────────────────────
+      openai:
+        api-key: ${OPENAI_API_KEY:}  # 留空表示不启用
+        base-url: https://api.openai.com
+        chat:
+          options:
+            model: gpt-4o
+            temperature: 0.7
+            max-tokens: 4096
+
+      # ──────────────────────────────────────────────────────
+      # 🤖 通义千问 Qwen（可选）
+      # 官网: https://dashscope.aliyun.com
+      # 价格: 适中，中文能力强
+      # ──────────────────────────────────────────────────────
+      qwen:
+        api-key: ${QWEN_API_KEY:}  # 留空表示不启用
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        chat:
+          options:
+            model: qwen-max
+            temperature: 0.7
+            max-tokens: 4096
+
+      # ──────────────────────────────────────────────────────
+      # 🎨 Claude（可选）
+      # 官网: https://console.anthropic.com
+      # 价格: 较贵，创意写作优秀
+      # ──────────────────────────────────────────────────────
+      claude:
+        api-key: ${ANTHROPIC_API_KEY:}  # 留空表示不启用
+        base-url: https://api.anthropic.com
+        chat:
+          options:
+            model: claude-sonnet-4-6
+            temperature: 0.7
+            max-tokens: 4096
+
+# ============================================================================
+# 💡 常见问题
+# ============================================================================
+#
+# Q1: 我只配置了一个 Provider，可以吗？
+# A1: ✅ 完全可以！系统只需要至少一个有效的 Provider 就能运行。
+#
+# Q2: 如何切换默认的 AI Provider？
+# A2: 修改 spring.ai.default-provider 的值为你想用的 provider 名称
+#
+# Q3: API Key 从哪里获取？
+# A3: 
+#    - DeepSeek: https://platform.deepseek.com/api-keys
+#    - OpenAI: https://platform.openai.com/api-keys
+#    - 通义千问: https://dashscope.console.aliyun.com/apiKey
+#    - Claude: https://console.anthropic.com/settings/keys
+#
+# Q4: 为什么启动时报错 "No AI providers configured"？
+# A4: 请检查：
+#    1. application-dev.yml 是否存在
+#    2. 是否至少配置了一个 provider 的 api-key
+#    3. api-key 是否为空字符串或占位符
+#
+# Q5: 可以使用环境变量吗？
+# A5: ✅ 可以！例如：api-key: ${DEEPSEEK_API_KEY}
+#     然后在系统中设置环境变量即可
+#
+# ============================================================================

@@ -2,6 +2,7 @@ package com.novel2script.infrastructure.persistence.converter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.novel2script.common.enums.ConflictType;
 import com.novel2script.domain.model.PlotEvent;
 import com.novel2script.infrastructure.persistence.po.PlotEventPO;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +30,7 @@ public class PlotEventConverter {
         po.setDescription(plotEvent.getDescription());
         po.setLocation(plotEvent.getLocation());
         po.setTimePoint(plotEvent.getTimePoint());
-        po.setConflictType(plotEvent.getConflictType());
+        po.setConflictType(plotEvent.getConflictType() != null ? plotEvent.getConflictType().name() : null);
         po.setChapterIds(toJsonLongList(plotEvent.getChapterIds()));
         po.setCharacterIds(toJsonLongList(plotEvent.getCharacterIds()));
         po.setImportance(plotEvent.getImportance());
@@ -49,7 +50,7 @@ public class PlotEventConverter {
         plotEvent.setDescription(po.getDescription());
         plotEvent.setLocation(po.getLocation());
         plotEvent.setTimePoint(po.getTimePoint());
-        plotEvent.setConflictType(po.getConflictType());
+        plotEvent.setConflictType(ConflictType.fromLabel(po.getConflictType()));
         plotEvent.setChapterIds(fromJsonToLongList(po.getChapterIds()));
         plotEvent.setCharacterIds(fromJsonToLongList(po.getCharacterIds()));
         plotEvent.setImportance(po.getImportance() != null ? po.getImportance() : 0);
