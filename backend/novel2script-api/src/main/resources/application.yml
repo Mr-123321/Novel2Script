@@ -25,14 +25,48 @@ spring:
     baseline-version: 0
     locations: classpath:db/migration
   ai:
-    openai:
-      api-key: ${AI_API_KEY}
-      base-url: ${AI_BASE_URL:https://api.deepseek.com}
-      chat:
-        options:
-          model: ${AI_MODEL:deepseek-chat}
-          temperature: ${AI_TEMPERATURE:0.7}
-          max-tokens: ${AI_MAX_TOKENS:4096}
+    # 默认使用的 AI 提供商（必须在 providers 中配置）
+    default-provider: deepseek
+
+    # ── 多提供商配置 ──────────────────────────────────────
+    # 每个提供商独立配置 API key、base-url 和 chat 参数
+    # 所有提供商均使用 OpenAI 兼容接口协议
+    providers:
+      deepseek:
+        api-key: ${DEEPSEEK_API_KEY}
+        base-url: https://api.deepseek.com
+        chat:
+          options:
+            model: deepseek-chat
+            temperature: 0.7
+            max-tokens: 4096
+
+      openai:
+        api-key: ${OPENAI_API_KEY:}
+        base-url: https://api.openai.com
+        chat:
+          options:
+            model: gpt-4o
+            temperature: 0.7
+            max-tokens: 4096
+
+      qwen:
+        api-key: ${QWEN_API_KEY:}
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        chat:
+          options:
+            model: qwen-max
+            temperature: 0.7
+            max-tokens: 4096
+
+      claude:
+        api-key: ${ANTHROPIC_API_KEY:}
+        base-url: https://api.anthropic.com
+        chat:
+          options:
+            model: claude-sonnet-4-6
+            temperature: 0.7
+            max-tokens: 4096
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

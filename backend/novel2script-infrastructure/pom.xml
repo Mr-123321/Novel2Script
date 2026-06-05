@@ -55,6 +55,24 @@
             <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
         </dependency>
 
+        <!-- Spring Retry (指数退避重试) -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
+
+        <!-- Spring AOP (AI 调用监控切面) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- Spring JDBC (prompt_audits 表写入) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
         <!-- SnakeYAML -->
         <dependency>
             <groupId>org.yaml</groupId>
