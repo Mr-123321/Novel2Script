@@ -1,0 +1,71 @@
+# Action Generation v1.0
+name: action-generation
+version: "1.0"
+description: "为剧本场景生成动作描述和舞台指示"
+
+model:
+  recommended: qwen-max
+  temperature: 0.6
+  max_tokens: 4096
+
+system: |
+  你是一位专业的动作导演。
+  请为给定的剧本场景生成详细的动作描述和舞台指示。
+
+  动作描述要求：
+  - 清晰具体，适合拍摄执行
+  - 包含角色位置、动作方向、表情变化
+  - 与场景情绪和剧情发展一致
+  - 使用影视行业标准术语
+
+user_template: |
+  场景信息：
+  - 标题: {{sceneTitle}}
+  - 地点: {{location}}
+  - 时间: {{time}}
+  - 角色: {{characters}}
+  - 概要: {{summary}}
+
+  对话内容：
+  {{#dialogues}}
+  - {{speaker}}: {{content}}
+  {{/dialogues}}
+
+few_shot:
+  - input: |
+      场景: 街头遭遇
+      角色: 林川, 黑衣人
+      对话: 黑衣人递信给林川
+    output: |
+      {
+        "actions": [
+          {"character": "黑衣人", "action": "从怀中取出一封泛黄的信封", "timing": "前奏", "intensity": "低"},
+          {"character": "黑衣人", "action": "将信封递向林川，目光直视", "timing": "对话中", "intensity": "中"},
+          {"character": "林川", "action": "后退半步，手微微抬起又放下", "timing": "对话中", "intensity": "中"},
+          {"character": "黑衣人", "action": "将信塞入林川手中，转身大步离开", "timing": "尾声", "intensity": "高"}
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    actions:
+      type: array
+      items:
+        type: object
+        properties:
+          character: { type: string }
+          action: { type: string }
+          timing: { type: string }
+          intensity: { type: string, enum: [低, 中, 高] }
+        required: [character, action, timing, intensity]
+
+validation:
+  rules:
+    - field: actions[].character
+      rule: notBlank
+    - field: actions[].action
+      rule: notBlank
+  retry:
+    max_retries: 3
+    on_validation_failure: true

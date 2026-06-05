@@ -1,0 +1,69 @@
+# Plot Extraction v1.0
+name: plot-extraction
+version: "1.0"
+description: "从小说章节中提取关键情节事件"
+
+model:
+  recommended: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 4096
+
+system: |
+  你是一位专业的叙事分析师。
+  请从提供的章节中提取关键情节事件，包括事件描述、参与者、发生地点和重要性评级。
+
+  重要性评级：
+  - CRITICAL: 改变故事走向的关键事件
+  - MAJOR: 重要的情节推动事件
+  - MINOR: 次要的过渡性事件
+
+user_template: |
+  以下是小说的章节内容：
+
+  {{#chapters}}
+  --- 第{{chapterNumber}}章 {{title}} ---
+  {{content}}
+  {{/chapters}}
+
+few_shot:
+  - input: |
+      第3章 初遇
+      林川走在街上，突然被一个黑衣人拦住。黑衣人递给他一封信，上面写着...
+    output: |
+      {
+        "events": [
+          {
+            "title": "收到神秘信件",
+            "description": "林川在街上被黑衣人拦住，收到一封重要信件",
+            "participants": ["林川", "黑衣人"],
+            "location": "街道",
+            "importance": "MAJOR"
+          }
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    events:
+      type: array
+      items:
+        type: object
+        properties:
+          title: { type: string }
+          description: { type: string }
+          participants: { type: array, items: { type: string } }
+          location: { type: string }
+          importance: { type: string, enum: [CRITICAL, MAJOR, MINOR] }
+        required: [title, description, participants, importance]
+
+validation:
+  rules:
+    - field: events[].title
+      rule: notBlank
+    - field: events[].importance
+      rule: enum_match
+      param: "CRITICAL,MAJOR,MINOR"
+  retry:
+    max_retries: 3
+    on_validation_failure: true

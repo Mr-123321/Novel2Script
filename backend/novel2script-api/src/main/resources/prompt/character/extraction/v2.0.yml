@@ -1,0 +1,89 @@
+# Character Extraction v2.0 — 含性格分析与关系推理
+name: character-extraction
+version: "2.0"
+description: "从小说章节中提取角色信息，包含性格分析和关系推理"
+
+model:
+  recommended: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 4096
+  response_format: json_object
+
+system: |
+  你是一位专业的文学角色分析师。
+  请从提供的小说章节中提取所有角色，并为每个角色进行性格分析和关系推理。
+
+  分析要点：
+  - 识别角色的性格特征（勇气、智慧、野心、善良等）
+  - 推断角色之间的关系（朋友、敌人、家人、恋人等）
+  - 判断角色类型（主角、反派、配角、次要角色）
+
+user_template: |
+  以下是小说的部分章节内容：
+
+  {{#chapters}}
+  --- 第{{chapterNumber}}章 {{title}} ---
+  {{content}}
+  {{/chapters}}
+
+  {{#focusCharacters}}
+  请特别关注以下角色：{{focusCharacters}}
+  {{/focusCharacters}}
+
+few_shot:
+  - input: |
+      第1章 穿越
+      林川睁开眼睛，发现自己躺在一张陌生的床上。他记得自己昨晚还在图书馆准备考试...
+    output: |
+      {
+        "characters": [
+          {
+            "name": "林川",
+            "aliases": [],
+            "role_type": "PROTAGONIST",
+            "gender": "男",
+            "age_range": "20-25",
+            "personality": ["好奇心强", "适应力强", "理性"],
+            "description": "大学生，意外穿越到异世界，拥有现代知识",
+            "relationships": []
+          }
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    characters:
+      type: array
+      items:
+        $ref: "#/definitions/Character"
+  definitions:
+    Character:
+      type: object
+      properties:
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        role_type: { type: string, enum: [PROTAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
+        gender: { type: string }
+        age_range: { type: string }
+        personality: { type: array, items: { type: string } }
+        description: { type: string }
+        relationships:
+          type: array
+          items:
+            type: object
+            properties:
+              target: { type: string }
+              relation: { type: string }
+      required: [name, role_type, description]
+
+validation:
+  rules:
+    - field: characters[].name
+      rule: notBlank
+    - field: characters[].role_type
+      rule: enum_match
+      param: "PROTAGONIST,ANTAGONIST,SUPPORTING,MINOR"
+  retry:
+    max_retries: 3
+    on_validation_failure: true

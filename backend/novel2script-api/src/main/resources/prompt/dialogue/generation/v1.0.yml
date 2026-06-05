@@ -1,0 +1,77 @@
+# Dialogue Generation v1.0
+name: dialogue-generation
+version: "1.0"
+description: "为剧本场景生成自然对话"
+
+model:
+  recommended: claude-sonnet-4-6
+  temperature: 0.7
+  max_tokens: 4096
+
+system: |
+  你是一位专业的影视对白编剧。
+  请为给定的场景生成自然、流畅的角色对话。
+
+  对白要求：
+  - 符合角色性格和身份
+  - 推动剧情发展
+  - 包含潜台词和情感层次
+  - 避免过于书面化的表达
+
+user_template: |
+  场景信息：
+  - 标题: {{sceneTitle}}
+  - 地点: {{location}}
+  - 时间: {{time}}
+  - 角色: {{characters}}
+  - 场景概要: {{summary}}
+
+  角色信息：
+  {{#characterProfiles}}
+  - {{name}}: {{description}} (性格: {{personality}})
+  {{/characterProfiles}}
+
+  {{#style}}
+  风格要求: {{style}}
+  {{/style}}
+
+few_shot:
+  - input: |
+      场景: 街头遭遇
+      角色: 林川 (大学生，好奇心强), 黑衣人 (神秘，冷静)
+      概要: 林川被黑衣人拦住递信
+    output: |
+      {
+        "dialogues": [
+          {"speaker": "黑衣人", "content": "你就是林川吧？有人让我把这个交给你。", "emotion": "平静", "stage_direction": "从怀中取出信封"},
+          {"speaker": "林川", "content": "你是谁？这是什么？", "emotion": "警觉", "stage_direction": "后退半步，皱眉"},
+          {"speaker": "黑衣人", "content": "看了你就知道了。记住，不要告诉任何人。", "emotion": "严肃", "stage_direction": "将信塞入林川手中，转身离开"}
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    dialogues:
+      type: array
+      items:
+        type: object
+        properties:
+          speaker: { type: string }
+          content: { type: string }
+          emotion: { type: string }
+          stage_direction: { type: string }
+        required: [speaker, content]
+
+validation:
+  rules:
+    - field: dialogues[].speaker
+      rule: notBlank
+    - field: dialogues[].content
+      rule: notBlank
+    - field: dialogues[].content
+      rule: minLength
+      param: "2"
+  retry:
+    max_retries: 3
+    on_validation_failure: true
