@@ -1,0 +1,478 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Novel2Script Schema",
+  "description": "Novel2Script 剧本 YAML Schema — 定义从小说到剧本的完整数据结构",
+  "type": "object",
+  "required": ["meta", "characters", "scenes"],
+  "additionalProperties": false,
+  "properties": {
+
+    "meta": {
+      "type": "object",
+      "description": "剧本元信息",
+      "required": ["title", "original_novel", "version", "generated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "剧本标题",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "original_novel": {
+          "type": "string",
+          "description": "原著小说名称",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "description": "剧本版本号",
+          "minimum": 1
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "生成时间 (ISO 8601)"
+        },
+        "generator": {
+          "type": "string",
+          "description": "生成器标识"
+        },
+        "scene_count": {
+          "type": "integer",
+          "description": "场景总数",
+          "minimum": 0
+        },
+        "character_count": {
+          "type": "integer",
+          "description": "角色总数",
+          "minimum": 0
+        },
+        "dialogue_count": {
+          "type": "integer",
+          "description": "对白总数",
+          "minimum": 0
+        }
+      }
+    },
+
+    "characters": {
+      "type": "array",
+      "description": "角色定义列表",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/CharacterDef"
+      }
+    },
+
+    "scenes": {
+      "type": "array",
+      "description": "场景列表",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/SceneDef"
+      }
+    },
+
+    "storyboard": {
+      "type": "array",
+      "description": "分镜定义 (可选扩展)",
+      "items": {
+        "$ref": "#/$defs/StoryboardDef"
+      }
+    },
+
+    "voiceover": {
+      "type": "array",
+      "description": "AI 配音标记 (可选扩展)",
+      "items": {
+        "$ref": "#/$defs/VoiceoverDef"
+      }
+    },
+
+    "video": {
+      "type": "object",
+      "description": "视频生成标记 (可选扩展)",
+      "additionalProperties": false,
+      "properties": {
+        "default_transition": {
+          "$ref": "#/$defs/TransitionType"
+        },
+        "scene_transitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SceneTransition"
+          }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+
+    "CharacterDef": {
+      "type": "object",
+      "description": "角色定义",
+      "required": ["id", "name", "role_type", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "角色唯一标识",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "description": "角色标准名称",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "aliases": {
+          "type": "array",
+          "description": "别名列表",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "role_type": {
+          "$ref": "#/$defs/CharacterRoleType"
+        },
+        "gender": {
+          "type": "string",
+          "description": "性别",
+          "enum": ["MALE", "FEMALE", "UNKNOWN"]
+        },
+        "age_range": {
+          "type": "string",
+          "description": "年龄段，如 '18-22'",
+          "pattern": "^\\d+-\\d+$"
+        },
+        "description": {
+          "type": "string",
+          "description": "角色描述",
+          "minLength": 1
+        },
+        "personality": {
+          "type": "array",
+          "description": "性格特征列表",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "description": "角色关系列表",
+          "items": {
+            "$ref": "#/$defs/Relationship"
+          }
+        }
+      }
+    },
+
+    "CharacterRoleType": {
+      "type": "string",
+      "description": "角色类型",
+      "enum": ["PROTAGONIST", "ANTAGONIST", "SUPPORTING", "MINOR"]
+    },
+
+    "Relationship": {
+      "type": "object",
+      "description": "角色关系",
+      "required": ["target", "relation"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "关系目标角色名"
+        },
+        "relation": {
+          "type": "string",
+          "description": "关系类型，如 '恋人'、'兄弟'、'师生'、'敌人'"
+        }
+      }
+    },
+
+    "SceneDef": {
+      "type": "object",
+      "description": "场景定义",
+      "required": ["scene_number", "heading", "location", "time_of_day", "is_interior", "summary", "sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "scene_number": {
+          "type": "integer",
+          "description": "场景序号",
+          "minimum": 1
+        },
+        "heading": {
+          "type": "string",
+          "description": "标准场景头，格式: '内/外 地点 - 时间'",
+          "minLength": 1,
+          "pattern": "^[内外] .+ - .+$"
+        },
+        "location": {
+          "type": "string",
+          "description": "场景地点",
+          "minLength": 1
+        },
+        "time_of_day": {
+          "$ref": "#/$defs/TimeOfDay"
+        },
+        "is_interior": {
+          "type": "boolean",
+          "description": "是否为室内场景 (true=INT, false=EXT)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "场景摘要 (50-200字)",
+          "minLength": 10,
+          "maxLength": 500
+        },
+        "mood": {
+          "type": "string",
+          "description": "场景氛围"
+        },
+        "chapter_sources": {
+          "type": "array",
+          "description": "来源章节编号列表",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "present_characters": {
+          "type": "array",
+          "description": "出场角色ID列表",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "sequence": {
+          "type": "array",
+          "description": "场景内动作-对白时序序列",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/ActionItem" },
+              { "$ref": "#/$defs/DialogueItem" }
+            ]
+          }
+        }
+      }
+    },
+
+    "TimeOfDay": {
+      "type": "string",
+      "description": "时间段",
+      "enum": ["DAWN", "MORNING", "AFTERNOON", "EVENING", "DUSK", "NIGHT", "LATE_NIGHT", "UNKNOWN"]
+    },
+
+    "ActionItem": {
+      "type": "object",
+      "description": "动作项",
+      "required": ["type", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ACTION"
+        },
+        "character": {
+          "type": ["string", "null"],
+          "description": "执行者名称，null表示环境动作"
+        },
+        "action_type": {
+          "$ref": "#/$defs/ActionType"
+        },
+        "description": {
+          "type": "string",
+          "description": "动作描述 (必须可视化可拍摄)",
+          "minLength": 1
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "预估持续时间 (毫秒)",
+          "minimum": 0
+        }
+      }
+    },
+
+    "DialogueItem": {
+      "type": "object",
+      "description": "对白项",
+      "required": ["type", "speaker", "emotion", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "DIALOGUE"
+        },
+        "speaker": {
+          "type": "string",
+          "description": "说话人名称",
+          "minLength": 1
+        },
+        "emotion": {
+          "$ref": "#/$defs/Emotion"
+        },
+        "content": {
+          "type": "string",
+          "description": "对白内容",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "parenthetical": {
+          "type": ["string", "null"],
+          "description": "括号说明，如 '(低声)'、'(冷笑)'"
+        },
+        "reply_to": {
+          "type": ["integer", "null"],
+          "description": "回复的对白序号 (在场景内sequence中的索引)",
+          "minimum": 0
+        }
+      }
+    },
+
+    "ActionType": {
+      "type": "string",
+      "description": "动作类型",
+      "enum": ["ACTION", "REACTION", "BEAT", "BUSINESS"]
+    },
+
+    "Emotion": {
+      "type": "string",
+      "description": "情绪类型",
+      "enum": ["ANGRY", "HAPPY", "SAD", "CALM", "FEARFUL", "SURPRISED", "NEUTRAL"]
+    },
+
+    "StoryboardDef": {
+      "type": "object",
+      "description": "分镜定义 (可选扩展)",
+      "required": ["scene_number", "shots"],
+      "additionalProperties": false,
+      "properties": {
+        "scene_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShotDef"
+          }
+        }
+      }
+    },
+
+    "ShotDef": {
+      "type": "object",
+      "description": "分镜镜头定义",
+      "required": ["shot_number", "camera", "angle", "duration_sec", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "shot_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "camera": {
+          "$ref": "#/$defs/CameraPosition"
+        },
+        "angle": {
+          "$ref": "#/$defs/CameraAngle"
+        },
+        "duration_sec": {
+          "type": "number",
+          "description": "镜头时长 (秒)",
+          "exclusiveMinimum": 0
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "movement": {
+          "$ref": "#/$defs/CameraMovement"
+        },
+        "transition": {
+          "$ref": "#/$defs/TransitionType"
+        }
+      }
+    },
+
+    "CameraPosition": {
+      "type": "string",
+      "enum": ["EXTREME_WIDE", "WIDE", "MEDIUM_WIDE", "MEDIUM", "MEDIUM_CLOSE_UP", "CLOSE_UP", "EXTREME_CLOSE_UP", "POV", "OVER_SHOULDER"]
+    },
+
+    "CameraAngle": {
+      "type": "string",
+      "enum": ["EYE_LEVEL", "HIGH_ANGLE", "LOW_ANGLE", "DUTCH_ANGLE", "BIRDS_EYE", "WORMS_EYE", "OVERHEAD"]
+    },
+
+    "CameraMovement": {
+      "type": "string",
+      "enum": ["STATIC", "PAN_LEFT", "PAN_RIGHT", "TILT_UP", "TILT_DOWN", "DOLLY_IN", "DOLLY_OUT", "ZOOM_IN", "ZOOM_OUT", "HANDHELD", "CRANE_UP", "CRANE_DOWN", "TRACKING", "STEADICAM"]
+    },
+
+    "TransitionType": {
+      "type": "string",
+      "enum": ["CUT", "DISSOLVE", "FADE_IN", "FADE_OUT", "FADE_TO_BLACK", "FADE_TO_WHITE", "WIPE", "MATCH_CUT", "JUMP_CUT", "SMASH_CUT"]
+    },
+
+    "VoiceoverDef": {
+      "type": "object",
+      "description": "AI 配音标记 (可选扩展)",
+      "required": ["character_id", "voice_id"],
+      "additionalProperties": false,
+      "properties": {
+        "character_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "voice_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "speed": {
+          "type": "number",
+          "description": "语速倍率 (1.0 = 正常)",
+          "exclusiveMinimum": 0
+        },
+        "pitch": {
+          "type": "integer",
+          "description": "音调偏移 (半音)"
+        },
+        "pause_between": {
+          "type": "integer",
+          "description": "句间停顿 (毫秒)",
+          "minimum": 0
+        }
+      }
+    },
+
+    "SceneTransition": {
+      "type": "object",
+      "description": "场景转场定义",
+      "required": ["from_scene", "to_scene", "transition"],
+      "additionalProperties": false,
+      "properties": {
+        "from_scene": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "to_scene": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "transition": {
+          "$ref": "#/$defs/TransitionType"
+        },
+        "duration_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}

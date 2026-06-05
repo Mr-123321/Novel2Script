@@ -1,0 +1,411 @@
+# ============================================================
+# Novel2Script 剧本 YAML 示例
+# 基于《星辰大海》小说片段生成
+# ============================================================
+
+meta:
+  title: "星辰大海"
+  original_novel: "星辰变"
+  version: 1
+  generated_at: "2026-06-05T10:30:00"
+  generator: "Novel2Script v1.0"
+  scene_count: 3
+  character_count: 5
+  dialogue_count: 14
+
+# ---- 角色定义 ----
+characters:
+  - id: 1
+    name: "林川"
+    aliases: ["川哥", "小川", "林师兄"]
+    role_type: "PROTAGONIST"
+    gender: "MALE"
+    age_range: "18-22"
+    description: "穿越者，原为21世纪大学生，穿越到高三学生身上"
+    personality: ["冷静", "果断", "内敛", "重情义"]
+    relationships:
+      - target: "李雪"
+        relation: "恋人"
+      - target: "张大伟"
+        relation: "兄弟"
+      - target: "王老师"
+        relation: "师生"
+
+  - id: 2
+    name: "李雪"
+    aliases: ["雪儿", "雪姐"]
+    role_type: "SUPPORTING"
+    gender: "FEMALE"
+    age_range: "17-18"
+    description: "高三(5)班学习委员，温柔善良"
+    personality: ["温柔", "坚韧", "聪慧"]
+    relationships:
+      - target: "林川"
+        relation: "恋人"
+
+  - id: 3
+    name: "张大伟"
+    aliases: ["大伟", "胖子"]
+    role_type: "SUPPORTING"
+    gender: "MALE"
+    age_range: "18-19"
+    description: "林川的死党，性格开朗"
+    personality: ["开朗", "仗义", "粗心"]
+    relationships:
+      - target: "林川"
+        relation: "兄弟"
+
+  - id: 4
+    name: "王老师"
+    aliases: ["老王"]
+    role_type: "SUPPORTING"
+    gender: "MALE"
+    age_range: "40-50"
+    description: "高三(5)班班主任兼数学老师，严厉但负责"
+    personality: ["严厉", "负责", "古板"]
+    relationships: []
+
+  - id: 5
+    name: "赵天霸"
+    aliases: ["天霸", "赵少"]
+    role_type: "ANTAGONIST"
+    gender: "MALE"
+    age_range: "18-19"
+    description: "校霸，富二代，与林川多次冲突"
+    personality: ["嚣张", "阴险", "记仇"]
+    relationships:
+      - target: "林川"
+        relation: "敌人"
+
+# ---- 场景定义 ----
+scenes:
+  # ---- 场景 1: 教室 ----
+  - scene_number: 1
+    heading: "内 高三(5)班教室 - 日"
+    location: "高三(5)班教室"
+    time_of_day: "MORNING"
+    is_interior: true
+    summary: "林川穿越醒来，发现自己趴在课桌上，周围是陌生的教室和同学"
+    mood: "迷茫"
+    chapter_sources: [1]
+    present_characters: [1, 2, 3, 4]
+    sequence:
+      - type: "ACTION"
+        character: "林川"
+        action_type: "ACTION"
+        description: "林川猛地睁开眼睛，发现自己趴在课桌上，周围是陌生的教室"
+        duration_ms: 3000
+
+      - type: "DIALOGUE"
+        speaker: "张大伟"
+        emotion: "HAPPY"
+        content: "川哥，你可算醒了！昨晚打游戏打到几点啊？"
+        parenthetical: null
+        reply_to: null
+
+      - type: "ACTION"
+        character: "林川"
+        action_type: "REACTION"
+        description: "林川茫然地抬起头，环顾四周"
+        duration_ms: 2000
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "SURPRISED"
+        content: "这里是……高三(5)班？"
+        parenthetical: "(低声自语)"
+        reply_to: null
+
+      - type: "DIALOGUE"
+        speaker: "张大伟"
+        emotion: "HAPPY"
+        content: "你睡懵了吧？赶紧收拾，老王马上来了！"
+        parenthetical: null
+        reply_to: 4
+
+      - type: "ACTION"
+        character: "李雪"
+        action_type: "ACTION"
+        description: "李雪从前排转过头来，担忧地看着林川"
+        duration_ms: 2000
+
+      - type: "DIALOGUE"
+        speaker: "李雪"
+        emotion: "CALM"
+        content: "林川，你脸色不太好，要不要去医务室？"
+        parenthetical: null
+        reply_to: null
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "CALM"
+        content: "没事，就是做了个奇怪的梦。"
+        parenthetical: "(勉强笑了笑)"
+        reply_to: 7
+
+      - type: "ACTION"
+        character: null
+        action_type: "BEAT"
+        description: "上课铃声响起，教室里瞬间安静下来"
+        duration_ms: 5000
+
+      - type: "ACTION"
+        character: "王老师"
+        action_type: "ACTION"
+        description: "王老师夹着教案走进教室，目光扫过全班"
+        duration_ms: 3000
+
+      - type: "DIALOGUE"
+        speaker: "王老师"
+        emotion: "NEUTRAL"
+        content: "都坐好。今天讲函数的极值问题，期末必考。"
+        parenthetical: null
+        reply_to: null
+
+  # ---- 场景 2: 操场 ----
+  - scene_number: 2
+    heading: "外 操场 - 日"
+    location: "学校操场"
+    time_of_day: "AFTERNOON"
+    is_interior: false
+    summary: "体育课上，赵天霸故意挑衅林川，两人发生冲突"
+    mood: "紧张"
+    chapter_sources: [1, 2]
+    present_characters: [1, 3, 5]
+    sequence:
+      - type: "ACTION"
+        character: null
+        action_type: "ACTION"
+        description: "操场上阳光刺眼，学生们三三两两在跑道上慢跑"
+        duration_ms: 4000
+
+      - type: "ACTION"
+        character: "赵天霸"
+        action_type: "ACTION"
+        description: "赵天霸带着两个跟班走向林川，挡住去路"
+        duration_ms: 2000
+
+      - type: "DIALOGUE"
+        speaker: "赵天霸"
+        emotion: "ANGRY"
+        content: "哟，林川，听说你今天上课走神被老王骂了？"
+        parenthetical: "(冷笑)"
+        reply_to: null
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "CALM"
+        content: "让开。"
+        parenthetical: null
+        reply_to: 3
+
+      - type: "ACTION"
+        character: "赵天霸"
+        action_type: "ACTION"
+        description: "赵天霸伸手推向林川的肩膀"
+        duration_ms: 1000
+
+      - type: "DIALOGUE"
+        speaker: "赵天霸"
+        emotion: "ANGRY"
+        content: "你什么态度？信不信我让你在这个学校待不下去？"
+        parenthetical: null
+        reply_to: 4
+
+      - type: "ACTION"
+        character: "林川"
+        action_type: "REACTION"
+        description: "林川侧身闪开，目光变得锐利"
+        duration_ms: 1500
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "CALM"
+        content: "你可以试试。"
+        parenthetical: "(语气平淡)"
+        reply_to: 6
+
+      - type: "ACTION"
+        character: "张大伟"
+        action_type: "ACTION"
+        description: "张大伟跑过来拉住林川的胳膊"
+        duration_ms: 2000
+
+      - type: "DIALOGUE"
+        speaker: "张大伟"
+        emotion: "FEARFUL"
+        content: "川哥，别跟他一般见识，走！"
+        parenthetical: null
+        reply_to: 8
+
+  # ---- 场景 3: 天台 ----
+  - scene_number: 3
+    heading: "外 教学楼天台 - 黄昏"
+    location: "教学楼天台"
+    time_of_day: "DUSK"
+    is_interior: false
+    summary: "林川独自在天台思考穿越的真相，李雪找到他，两人产生情感共鸣"
+    mood: "温情"
+    chapter_sources: [2]
+    present_characters: [1, 2]
+    sequence:
+      - type: "ACTION"
+        character: "林川"
+        action_type: "BEAT"
+        description: "林川靠在天台栏杆上，望着远处的夕阳出神"
+        duration_ms: 5000
+
+      - type: "ACTION"
+        character: "李雪"
+        action_type: "ACTION"
+        description: "天台门被推开，李雪小心翼翼地走出来"
+        duration_ms: 2000
+
+      - type: "DIALOGUE"
+        speaker: "李雪"
+        emotion: "CALM"
+        content: "我就知道你在这里。"
+        parenthetical: null
+        reply_to: null
+
+      - type: "ACTION"
+        character: "林川"
+        action_type: "REACTION"
+        description: "林川没有回头，嘴角微微上扬"
+        duration_ms: 1500
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "SAD"
+        content: "有时候我觉得，这个世界不是我的。"
+        parenthetical: "(轻声)"
+        reply_to: 3
+
+      - type: "DIALOGUE"
+        speaker: "李雪"
+        emotion: "SAD"
+        content: "不管你是谁，你都是我的同学。"
+        parenthetical: null
+        reply_to: 5
+
+      - type: "ACTION"
+        character: null
+        action_type: "BEAT"
+        description: "两人沉默片刻，晚风吹过天台"
+        duration_ms: 3000
+
+      - type: "DIALOGUE"
+        speaker: "李雪"
+        emotion: "HAPPY"
+        content: "走吧，食堂快关门了。"
+        parenthetical: "(微笑)"
+        reply_to: null
+
+      - type: "DIALOGUE"
+        speaker: "林川"
+        emotion: "CALM"
+        content: "好。"
+        parenthetical: null
+        reply_to: 8
+
+      - type: "ACTION"
+        character: null
+        action_type: "ACTION"
+        description: "两人并肩走下天台，夕阳将他们的影子拉得很长"
+        duration_ms: 4000
+
+# ---- 分镜扩展 (可选) ----
+storyboard:
+  - scene_number: 1
+    shots:
+      - shot_number: 1
+        camera: "WIDE"
+        angle: "EYE_LEVEL"
+        duration_sec: 3.0
+        description: "教室全景，阳光从窗户洒入，学生们正在早自习"
+        movement: "STATIC"
+        transition: "FADE_IN"
+
+      - shot_number: 2
+        camera: "MEDIUM"
+        angle: "EYE_LEVEL"
+        duration_sec: 2.5
+        description: "林川趴在课桌上，缓缓抬起头"
+        movement: "DOLLY_IN"
+        transition: "CUT"
+
+      - shot_number: 3
+        camera: "CLOSE_UP"
+        angle: "EYE_LEVEL"
+        duration_sec: 1.5
+        description: "林川的表情从茫然变为震惊"
+        movement: "STATIC"
+        transition: "CUT"
+
+      - shot_number: 4
+        camera: "OVER_SHOULDER"
+        angle: "EYE_LEVEL"
+        duration_sec: 2.0
+        description: "从林川视角看张大伟，张大伟笑着拍桌子"
+        movement: "STATIC"
+        transition: "CUT"
+
+  - scene_number: 3
+    shots:
+      - shot_number: 1
+        camera: "EXTREME_WIDE"
+        angle: "HIGH_ANGLE"
+        duration_sec: 4.0
+        description: "天台上林川的孤独身影，远处是城市天际线"
+        movement: "CRANE_DOWN"
+        transition: "DISSOLVE"
+
+      - shot_number: 2
+        camera: "CLOSE_UP"
+        angle: "EYE_LEVEL"
+        duration_sec: 2.0
+        description: "林川的眼中映着夕阳的余晖"
+        movement: "STATIC"
+        transition: "CUT"
+
+      - shot_number: 3
+        camera: "MEDIUM"
+        angle: "EYE_LEVEL"
+        duration_sec: 3.0
+        description: "李雪推开门，逆光站在门口"
+        movement: "STATIC"
+        transition: "CUT"
+
+# ---- AI 配音标记 (可选扩展) ----
+voiceover:
+  - character_id: 1
+    voice_id: "male_young_01"
+    speed: 1.0
+    pitch: 0
+    pause_between: 300
+
+  - character_id: 2
+    voice_id: "female_gentle_01"
+    speed: 0.95
+    pitch: 2
+    pause_between: 400
+
+  - character_id: 4
+    voice_id: "male_middle_01"
+    speed: 0.85
+    pitch: -3
+    pause_between: 500
+
+# ---- 视频生成标记 (可选扩展) ----
+video:
+  default_transition: "CUT"
+  scene_transitions:
+    - from_scene: 1
+      to_scene: 2
+      transition: "DISSOLVE"
+      duration_sec: 1.5
+
+    - from_scene: 2
+      to_scene: 3
+      transition: "FADE_TO_BLACK"
+      duration_sec: 2.0
