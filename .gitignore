@@ -20,6 +20,12 @@ backend/novel2script-api/src/main/resources/application-dev-local.yml
 backend/novel2script-api/src/main/resources/application-dev.yml
 backend/novel2script-api/src/main/resources/.env.local
 
+# IDE / AI assistant
+.trae/
+Demo.md
+backend/error.txt
+temp_repo/
+
 # OS
 .DS_Store
 Thumbs.db
