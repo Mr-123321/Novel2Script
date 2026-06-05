@@ -2,6 +2,7 @@ package com.novel2script.api.advice;
 
 import com.novel2script.common.exception.AgentRetryException;
 import com.novel2script.common.exception.BusinessException;
+import com.novel2script.common.exception.ExportException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -44,6 +45,18 @@ public class GlobalExceptionHandler {
         problem.setProperty("agentName", ex.getAgentName());
         problem.setProperty("attemptsMade", ex.getAttemptsMade());
         problem.setProperty("maxAttempts", ex.getMaxAttempts());
+        problem.setProperty("timestamp", Instant.now().toString());
+        return problem;
+    }
+
+    @ExceptionHandler(ExportException.class)
+    public ProblemDetail handleExportException(ExportException ex) {
+        log.warn("Export exception: [{}] {}", ex.getErrorCode(), ex.getMessage());
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("Export Error");
+        problem.setProperty("errorCode", ex.getErrorCode());
         problem.setProperty("timestamp", Instant.now().toString());
         return problem;
     }
