@@ -1,0 +1,20 @@
+# Java
+target/
+*.class
+*.jar
+*.war
+*.log
+.idea/
+*.iml
+
+# Node
+node_modules/
+.next/
+out/
+
+# Docker
+.env
+
+# OS
+.DS_Store
+Thumbs.db
