@@ -1,7 +1,6 @@
 package com.novel2script.api.controller;
 
 import com.novel2script.application.service.NovelService;
-import com.novel2script.domain.dto.NovelUploadDTO;
 import com.novel2script.domain.model.Novel;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,7 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,20 +29,36 @@ public class NovelController {
 
     @PostMapping("/upload")
     @Operation(summary = "Upload a novel file for processing")
-    public ResponseEntity<Map<String, Object>> upload(@RequestBody NovelUploadDTO dto) {
-        log.info("Upload request: title='{}', fileName='{}'", dto.title(), dto.fileName());
+    public ResponseEntity<Map<String, Object>> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "author", required = false) String author) throws Exception {
+        
+        log.info("Upload request: fileName='{}', size={} bytes", file.getOriginalFilename(), file.getSize());
+
+        // 从文件名提取标题（如果没有提供）
+        String novelTitle = (title != null && !title.isBlank()) ? title : 
+                file.getOriginalFilename() != null ? 
+                file.getOriginalFilename().replaceAll("\\.[^.]+$", "") : "未命名";
+        
+        String novelAuthor = (author != null && !author.isBlank()) ? author : "未知作者";
 
         Novel novel = novelService.uploadNovel(
-                dto.title(), dto.author(), dto.fileName(),
-                dto.fileSize(), dto.content());
+                novelTitle, 
+                novelAuthor, 
+                file.getOriginalFilename(),
+                file.getSize(), 
+                new String(file.getBytes(), java.nio.charset.StandardCharsets.UTF_8));
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "novelId", novel.getId(),
-                "title", novel.getTitle(),
-                "chapterCount", novel.getChapterCount(),
-                "totalChars", novel.getTotalChars(),
-                "status", novel.getStatus().name()
-        ));
+        // 使用 HashMap 避免 null 值问题
+        Map<String, Object> response = new HashMap<>();
+        response.put("novelId", novel.getId());
+        response.put("title", novel.getTitle());
+        response.put("chapterCount", novel.getChapterCount());
+        response.put("totalChars", novel.getTotalChars());
+        response.put("status", novel.getStatus() != null ? novel.getStatus().name() : "UNKNOWN");
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
