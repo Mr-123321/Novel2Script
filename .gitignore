@@ -15,6 +15,11 @@ out/
 # Docker
 .env
 
+# Personal dev configurations (每个人本地配置，不提交到Git)
+backend/novel2script-api/src/main/resources/application-dev.yml
+backend/novel2script-api/src/main/resources/application-dev-local.yml
+backend/novel2script-api/src/main/resources/.env.local
+
 # OS
 .DS_Store
 Thumbs.db
