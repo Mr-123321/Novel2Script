@@ -25,9 +25,15 @@ export function CharacterPanel({ characters, selectedScene }: CharacterPanelProp
           </h4>
           <div className="space-y-0.5">
             {characters
-              .filter((c) =>
-                selectedScene.dialogues.some((d) => d.characterId === c.id)
-              )
+              .filter((c) => {
+                // Primary: scene.characterIds (set by SceneAgent)
+                if (selectedScene.characterIds?.includes(c.id)) return true;
+                // Fallback: dialogue characterId match
+                if (selectedScene.dialogues.some((d) => d.characterId === c.id)) return true;
+                // Fallback: dialogue speaker name match
+                if (selectedScene.dialogues.some((d) => d.speaker === c.canonicalName)) return true;
+                return false;
+              })
               .map((c) => (
                 <button
                   key={c.id}
@@ -50,11 +56,14 @@ export function CharacterPanel({ characters, selectedScene }: CharacterPanelProp
                   </span>
                 </button>
               ))}
-            {characters.filter((c) =>
-              selectedScene.dialogues.some((d) => d.characterId === c.id)
-            ).length === 0 && (
+            {characters.filter((c) => {
+              if (selectedScene.characterIds?.includes(c.id)) return true;
+              if (selectedScene.dialogues.some((d) => d.characterId === c.id)) return true;
+              if (selectedScene.dialogues.some((d) => d.speaker === c.canonicalName)) return true;
+              return false;
+            }).length === 0 && (
               <p className="text-xs text-muted-foreground px-2.5 py-2">
-                当前场景无角色
+                当前场景无角色数据
               </p>
             )}
           </div>

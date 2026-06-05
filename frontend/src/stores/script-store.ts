@@ -13,6 +13,7 @@ interface ScriptState {
   // Actions
   setScript: (script: Script) => void;
   clearScript: () => void;
+  setIsLoading: (loading: boolean) => void;
   updateProgress: (progress: WorkflowProgress) => void;
   updateScene: (sceneId: number, updates: Partial<Scene>) => void;
   updateDialogue: (dialogueId: number, updates: Partial<Dialogue>) => void;
@@ -34,6 +35,8 @@ export const useScriptStore = create<ScriptState>()((set, get) => ({
 
   clearScript: () =>
     set({ script: null, progress: null, isLoading: false, error: null }),
+
+  setIsLoading: (loading) => set({ isLoading: loading }),
 
   updateProgress: (progress) => set({ progress }),
 

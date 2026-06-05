@@ -164,6 +164,10 @@ public class CharacterResolverAgent {
     /**
      * Determine whether two names likely refer to the same person
      * using Chinese name heuristics.
+     *
+     * <p>Rules are deliberately conservative to avoid over-merging.
+     * Shared surname alone is NEVER sufficient — given names must also
+     * show strong similarity.
      */
     static boolean isSamePersonByRules(String name1, String name2) {
         if (name1 == null || name2 == null) return false;
@@ -173,37 +177,56 @@ public class CharacterResolverAgent {
         String n2 = name2.trim();
         if (n1.isEmpty() || n2.isEmpty()) return false;
 
-        // 1. One contains the other (e.g., "林川" contains "川")
-        if (n1.contains(n2) || n2.contains(n1)) return true;
+        // Minimum length: single-char names are too ambiguous
+        if (n1.length() == 1 || n2.length() == 1) return false;
 
-        // 2. Extract base names
+        // 1. Alias patterns: "小X" / "老X" / "阿X" vs full name "X"
+        //    e.g., "小川" ↔ "林川" (if base name matches)
+        if (isAliasPattern(n1, n2)) return true;
+
+        // 2. Suffix-stripped base names match
+        //    e.g., "川哥" ↔ "林川" (base = "川" matches given name "川")
         String base1 = extractBaseName(n1);
         String base2 = extractBaseName(n2);
 
-        if (base1.equals(base2)) return true;
+        if (base1.equals(base2) && base1.length() >= 2) return true;
 
-        // 3. Shared surname check (e.g., "林川" and "林师兄")
+        // 3. Full name appears as substring in longer name
+        //    Only applies when the shorter name is ≥2 chars
+        //    e.g., "萧炎" is NOT matched by "萧" (single char skipped above)
+        //    But "林川" contained in "小川" is handled by isAliasPattern
+        if (n1.length() >= 2 && n2.length() >= 2) {
+            if (n1.contains(n2) || n2.contains(n1)) {
+                // Only merge if the shorter name is a meaningful subset
+                // (at least 2 chars, and the longer is a compound/elaboration)
+                String shorter = n1.length() < n2.length() ? n1 : n2;
+                if (shorter.length() >= 2) return true;
+            }
+        }
+
+        // 4. Shared surname + given name similarity
+        //    e.g., "林川" and "林师兄" → surname "林" matches, given "川" ≈ base "林"
         if (hasSharedSurname(n1, n2)) {
             String given1 = extractGivenName(n1);
             String given2 = extractGivenName(n2);
-            if (given1 != null && given2 != null && given1.equals(given2)) {
-                return true;
-            }
-            // One given name contains the other
+            // Both must have identifiable given names
             if (given1 != null && given2 != null
-                    && (given1.contains(given2) || given2.contains(given1))) {
-                return true;
+                    && given1.length() >= 1 && given2.length() >= 1) {
+                // Exact given name match
+                if (given1.equals(given2)) return true;
+                // One given name contains the other (but both ≥1 char)
+                if (given1.contains(given2) || given2.contains(given1)) return true;
             }
         }
 
-        // 4. Levenshtein distance < 2 for short names (2-3 chars)
-        if (Math.min(n1.length(), n2.length()) <= 3) {
+        // 5. Very short Levenshtein distance for 2-char names only
+        //    e.g., "林川" and "林州" (typo)
+        if (n1.length() == 2 && n2.length() == 2) {
             int dist = levenshteinDistance(n1, n2);
-            if (dist < 2) return true;
+            if (dist == 1) return true;
         }
 
-        // 5. Alias patterns: "小X" / "老X" vs "X" or full name containing "X"
-        return isAliasPattern(n1, n2);
+        return false;
     }
 
     /**
@@ -277,16 +300,38 @@ public class CharacterResolverAgent {
 
     /**
      * Check alias patterns like "小川" ↔ "林川" or "川哥" ↔ "川".
+     *
+     * <p>Single-character bases are treated conservatively — they only
+     * match when the base appears as the <em>given name</em> (end portion)
+     * of the longer name, not as the surname (first character).
+     * This prevents "药老" from matching all "药*" characters.
      */
     private static boolean isAliasPattern(String n1, String n2) {
         String base1 = extractBaseName(n1);
         String base2 = extractBaseName(n2);
 
-        // "川哥" base is "川", and "林川" contains "川"
-        if (n1.contains(base2) || n2.contains(base1)) return true;
+        // Shared base name of sufficient length
+        if (base1.equals(base2)) return true;
 
-        // Shared base name
-        return base1.equals(base2);
+        // Substring matching: one name's base is contained in the other
+        // For single-char bases, require the base NOT at position 0
+        // (position 0 = surname match → too ambiguous)
+        if (n1.contains(base2)) {
+            if (base2.length() == 1) {
+                int pos = n1.indexOf(base2);
+                if (pos == 0 || n1.indexOf(base2, pos + 1) >= 0) return false;
+            }
+            return true;
+        }
+        if (n2.contains(base1)) {
+            if (base1.length() == 1) {
+                int pos = n2.indexOf(base1);
+                if (pos == 0 || n2.indexOf(base1, pos + 1) >= 0) return false;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     /**

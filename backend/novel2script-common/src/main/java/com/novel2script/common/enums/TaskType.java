@@ -12,19 +12,17 @@ package com.novel2script.common.enums;
  */
 public enum TaskType {
 
-    // ── Simple / cheap model ──────────────────────────────
-    CHAPTER_PARSE("deepseek"),
-    SCRIPT_COMPOSE("deepseek"),
-    YAML_EXPORT("deepseek"),
+    // ── Primary: Qwen (百炼) ── Fallback: DeepSeek when Qwen unavailable ──
+    CHAPTER_PARSE("qwen"),
+    SCRIPT_COMPOSE("qwen"),
+    YAML_EXPORT("qwen"),
 
-    // ── Creative / strong model ───────────────────────────
-    CHARACTER_EXTRACTION("claude"),
-    CHARACTER_RESOLVE("claude"),
-    PLOT_EXTRACTION("claude"),
-    DIALOGUE_GENERATE("claude"),
-    STORYBOARD_GENERATE("claude"),
+    CHARACTER_EXTRACTION("qwen"),
+    CHARACTER_RESOLVE("qwen"),
+    PLOT_EXTRACTION("qwen"),
+    DIALOGUE_GENERATE("qwen"),
+    STORYBOARD_GENERATE("qwen"),
 
-    // ── Batch / medium model ──────────────────────────────
     SCENE_SEGMENT("qwen"),
     ACTION_GENERATE("qwen");
 

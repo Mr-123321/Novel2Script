@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import {
   FileText,
   Github,
@@ -9,8 +10,12 @@ import {
   FileCode,
   ArrowRight,
   Wand2,
+  BookOpen,
+  Clock,
 } from 'lucide-react';
 import { UploadZone } from '@/components/novel/UploadZone';
+import { listScripts } from '@/lib/api';
+import type { Script } from '@/types/script';
 
 const features = [
   {
@@ -34,6 +39,14 @@ const features = [
 ];
 
 export default function HomePage() {
+  const [recentScripts, setRecentScripts] = useState<Script[]>([]);
+
+  useEffect(() => {
+    listScripts()
+      .then((scripts) => setRecentScripts(scripts.slice(0, 4)))
+      .catch(() => {}); // silently ignore on landing page
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Header */}
@@ -140,6 +153,60 @@ export default function HomePage() {
             </div>
           ))}
         </div>
+
+        {/* Recent projects */}
+        {recentScripts.length > 0 && (
+          <div
+            className="mt-16 w-full max-w-2xl animate-slide-up"
+            style={{ animationDelay: '0.7s', animationFillMode: 'both' }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                最近的项目
+              </h2>
+              <Link
+                href="/scripts"
+                className="text-xs text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1"
+              >
+                查看全部
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {recentScripts.map((script) => (
+                <Link
+                  key={script.id}
+                  href={`/scripts/${script.id}`}
+                  className="rounded-xl border border-white/5 bg-white/[0.02] p-4 card-lift group text-left"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="h-7 w-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0">
+                      <FileText className="h-3 w-3 text-teal-400" />
+                    </div>
+                    <span className="text-xs font-medium truncate group-hover:text-teal-400 transition-colors">
+                      {script.title || `剧本 #${script.id}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clapperboard className="h-2.5 w-2.5" />
+                      {script.sceneCount}场
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-2.5 w-2.5" />
+                      {script.status === 'GENERATING'
+                        ? `${Math.round(script.progress)}%`
+                        : script.status === 'COMPLETED'
+                        ? '完成'
+                        : '草稿'}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}

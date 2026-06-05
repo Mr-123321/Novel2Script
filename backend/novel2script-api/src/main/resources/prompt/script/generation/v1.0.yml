@@ -1,0 +1,274 @@
+# Script Generation v1.0 — 单次叙述→剧本转换
+name: script-generation
+version: "1.0"
+description: "将任意文字叙述直接转换为完整剧本 JSON，严格只提取原文已有信息"
+
+model:
+  recommended: qwen-plus
+  temperature: 0.3
+  max_tokens: 8192
+
+system: |
+  你是一位专业的剧本转换助手。你的任务是把用户提供的**任意一段文字叙述**（例如一段日常故事、新闻片段、或简短的情节描述），转换成一份标准格式的**剧本 JSON**。你**绝对不能添加原文中没有的信息**，也不能自行编造对话或情节。
+
+  ## 核心原则（从高到低）
+  1. **只取原文有的**：所有对话、动作、人物、场景都必须能在输入文字中直接找到依据。如果原文没写某句话，你就不写。
+  2. **拒绝凭空想象**：禁止添加任何原文未提及的细节，例如人物的心理活动、未发生的动作、原文没有的对话。
+  3. **人物只列出出现过的**：只记录在输入片段中**明确出现**或**有台词/动作**的角色。
+  4. **按时空切分场景**：时间或地点发生变化时，就要分成不同的 `scene`。
+  5. **把叙述变成动作**：将原文的叙述句转换为 `actions` 中的视觉化动作描述，使用现在时。
+  6. **对话原样保留**：原文中的直接引语必须逐字提取，一个字不能改。
+
+  ## 角色类型判断
+  - PROTAGONIST: 故事核心人物，叙述最多或视角跟随
+  - ANTAGONIST: 明确与主角对立或造成阻碍
+  - SUPPORTING: 有台词或有明确互动的配角
+  - EXTRAS: 仅被提及但无独立台词/动作
+
+  ## 场景切分规则
+  - 地点变化（从一处到另一处）→ 新场景
+  - 明显时间跳跃（"第二天"、"深夜"、"三天后"）→ 新场景
+  - 太短的片段（<50字）合并到相邻场景
+
+  ## 动作类型
+  - ACTION: 角色主动发出的动作（走、拿、打、写）
+  - REACTION: 角色对某事的反应（惊讶、后退、点头）
+  - BEAT: 短暂停顿/沉默/气氛变化
+  - BUSINESS: 背景/环境动作（开门、倒茶、整理东西）
+
+  ## 情绪判断
+  - CALM: 平静陈述
+  - ANGRY: 愤怒、斥责
+  - HAPPY: 高兴、欢笑
+  - SAD: 悲伤、低沉
+  - SURPRISED: 惊讶、意外
+  - UNKNOWN: 无法从原文判断
+
+  ## 禁止事项
+  - ❌ 不要添加原文没出现的角色
+  - ❌ 不要修改原文对话中的任何字
+  - ❌ 不要给人物编写内心独白或额外的动作
+  - ❌ 不要改变事实顺序或添加因果解释
+  - ❌ 不要推测人物的性格、心理或动机（如果原文没提）
+
+user_template: |
+  请将以下文字叙述转换为标准剧本 JSON。
+
+  {{#novelTitle}}
+  ## 小说标题
+  {{novelTitle}}
+  {{/novelTitle}}
+
+  ## 原文内容
+
+  {{#chapters}}
+  --- 第{{chapterNumber}}章 {{title}} ---
+  {{content}}
+  {{/chapters}}
+
+  请严格基于以上原文，输出完整的剧本 JSON。如果原文缺少某些信息（例如没写时间，就用 "UNKNOWN"），绝对不编造。
+
+few_shot:
+  - input: |
+      教室里。老师站在讲台上说："作业明天要交。"小明低下头，没说话。坐在后排的小红悄悄推了推小明的背。
+    output: |
+      {
+        "script": {
+          "title": "教室作业提醒",
+          "characters": [
+            {
+              "canonicalName": "老师",
+              "roleType": "SUPPORTING",
+              "gender": "未知",
+              "description": "在讲台上提醒学生交作业的老师",
+              "personality": ["未知"],
+              "relationships": []
+            },
+            {
+              "canonicalName": "小明",
+              "roleType": "PROTAGONIST",
+              "gender": "男",
+              "description": "学生，被老师提醒后低头不语",
+              "personality": ["未知"],
+              "relationships": []
+            },
+            {
+              "canonicalName": "小红",
+              "roleType": "SUPPORTING",
+              "gender": "女",
+              "description": "坐在后排的学生，推了推小明",
+              "personality": ["未知"],
+              "relationships": []
+            }
+          ],
+          "scenes": [
+            {
+              "sceneNumber": 1,
+              "location": "教室",
+              "timeOfDay": "UNKNOWN",
+              "interior": true,
+              "title": "老师提醒交作业",
+              "mood": "平静，略显紧张",
+              "dialogues": [
+                {
+                  "speaker": "老师",
+                  "content": "作业明天要交。",
+                  "emotion": "CALM"
+                }
+              ],
+              "actions": [
+                {
+                  "actionType": "ACTION",
+                  "description": "老师站在讲台上说话。"
+                },
+                {
+                  "actionType": "REACTION",
+                  "description": "小明低下头，没说话。"
+                },
+                {
+                  "actionType": "ACTION",
+                  "description": "小红悄悄推了推小明的背。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+
+  - input: |
+      深夜，医院走廊。林医生快步走向急诊室，护士小张紧跟在后："血压在下降！"林医生推开急诊室的门，看到病床上的老人面色苍白。"准备抢救。"林医生冷静地说。
+    output: |
+      {
+        "script": {
+          "title": "深夜急诊抢救",
+          "characters": [
+            {
+              "canonicalName": "林医生",
+              "roleType": "PROTAGONIST",
+              "gender": "未知",
+              "description": "急诊医生，冷静指挥抢救",
+              "personality": ["冷静"],
+              "relationships": []
+            },
+            {
+              "canonicalName": "小张",
+              "roleType": "SUPPORTING",
+              "gender": "未知",
+              "description": "护士，跟随林医生报告病情",
+              "personality": ["未知"],
+              "relationships": []
+            },
+            {
+              "canonicalName": "老人",
+              "roleType": "EXTRAS",
+              "gender": "男",
+              "description": "病床上的老年患者，面色苍白",
+              "personality": ["未知"],
+              "relationships": []
+            }
+          ],
+          "scenes": [
+            {
+              "sceneNumber": 1,
+              "location": "医院走廊",
+              "timeOfDay": "NIGHT",
+              "interior": true,
+              "title": "紧急赶往急诊室",
+              "mood": "紧张，急迫",
+              "dialogues": [
+                {
+                  "speaker": "小张",
+                  "content": "血压在下降！",
+                  "emotion": "SURPRISED"
+                }
+              ],
+              "actions": [
+                {
+                  "actionType": "ACTION",
+                  "description": "林医生快步走向急诊室，护士小张紧跟在后。"
+                }
+              ]
+            },
+            {
+              "sceneNumber": 2,
+              "location": "急诊室",
+              "timeOfDay": "NIGHT",
+              "interior": true,
+              "title": "准备抢救病人",
+              "mood": "紧张，凝重",
+              "dialogues": [
+                {
+                  "speaker": "林医生",
+                  "content": "准备抢救。",
+                  "emotion": "CALM"
+                }
+              ],
+              "actions": [
+                {
+                  "actionType": "ACTION",
+                  "description": "林医生推开急诊室的门，看到病床上的老人面色苍白。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+
+output_schema:
+  type: object
+  properties:
+    script:
+      type: object
+      properties:
+        title:
+          type: string
+          description: "剧本标题"
+        characters:
+          type: array
+          items:
+            type: object
+            properties:
+              canonicalName: { type: string }
+              roleType: { type: string, enum: [PROTAGONIST, ANTAGONIST, SUPPORTING, EXTRAS] }
+              gender: { type: string }
+              description: { type: string }
+              personality: { type: array, items: { type: string } }
+              relationships: { type: array }
+        scenes:
+          type: array
+          items:
+            type: object
+            properties:
+              sceneNumber: { type: integer }
+              location: { type: string }
+              timeOfDay: { type: string, enum: [DAWN, MORNING, AFTERNOON, EVENING, NIGHT, LATE_NIGHT, UNKNOWN] }
+              interior: { type: boolean }
+              title: { type: string }
+              mood: { type: string }
+              dialogues:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    speaker: { type: string }
+                    content: { type: string }
+                    emotion: { type: string, enum: [CALM, ANGRY, HAPPY, SAD, SURPRISED, UNKNOWN] }
+              actions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    actionType: { type: string, enum: [BEAT, ACTION, REACTION, BUSINESS] }
+                    description: { type: string }
+
+validation:
+  rules:
+    - field: script.title
+      rule: notBlank
+    - field: script.characters
+      rule: notEmpty
+    - field: script.scenes
+      rule: notEmpty
+  retry:
+    max_retries: 2
+    on_validation_failure: true

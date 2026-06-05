@@ -18,6 +18,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -92,6 +96,9 @@ public class DialogueAgent {
                 new org.springframework.ai.chat.prompt.Prompt(
                         new org.springframework.ai.chat.messages.UserMessage(prompt)));
 
+        // Log token usage
+        logTokenUsage(response, prompt, "dialogue-generation");
+
         List<Dialogue> dialogues = parseResponse(response, scene, presentCharacters);
 
         // Run consistency check
@@ -143,6 +150,8 @@ public class DialogueAgent {
 
     /**
      * Batch-generate dialogues for multiple scenes in parallel.
+     * Uses a thread pool for concurrent AI calls — dramatically reduces wall-clock time
+     * when processing many scenes.
      *
      * @param scenes       all scenes to generate dialogue for
      * @param characters   all characters in the script
@@ -156,25 +165,53 @@ public class DialogueAgent {
             return Map.of();
         }
 
-        Map<Long, List<Dialogue>> results = new LinkedHashMap<>();
-        Scene previousScene = null;
+        int parallelism = Math.min(scenes.size(), Runtime.getRuntime().availableProcessors());
+        ExecutorService executor = Executors.newFixedThreadPool(Math.max(2, parallelism));
 
-        for (Scene scene : scenes) {
-            List<Character> presentCharacters = filterPresentCharacters(scene, characters);
-            List<PlotEvent> events = sceneEvents != null
-                    ? sceneEvents.getOrDefault(scene.getId(), List.of())
-                    : List.of();
+        try {
+            Map<Long, List<Dialogue>> results = new LinkedHashMap<>();
+            List<CompletableFuture<Map.Entry<Long, List<Dialogue>>>> futures = new ArrayList<>();
 
-            List<Dialogue> dialogues = generate(scene, presentCharacters, events, previousScene, null);
-            // If character IDs are populated in scene, merge with generated dialogues
-            assignCharacterIds(dialogues, characters);
-            results.put(scene.getId(), dialogues);
+            for (int i = 0; i < scenes.size(); i++) {
+                final Scene scene = scenes.get(i);
+                final int sceneIndex = i;
 
-            previousScene = scene;
+                CompletableFuture<Map.Entry<Long, List<Dialogue>>> future =
+                        CompletableFuture.supplyAsync(() -> {
+                    List<Character> presentCharacters = filterPresentCharacters(scene, characters);
+                    List<PlotEvent> events = sceneEvents != null
+                            ? sceneEvents.getOrDefault(scene.getId(), List.of())
+                            : List.of();
+
+                    // Determine previous scene for narrative continuity
+                    Scene prevScene = sceneIndex > 0 ? scenes.get(sceneIndex - 1) : null;
+
+                    List<Dialogue> dialogues = generate(scene, presentCharacters, events, prevScene, null);
+                    assignCharacterIds(dialogues, characters);
+                    return Map.entry(scene.getId(), dialogues);
+                }, executor);
+
+                futures.add(future);
+            }
+
+            // Collect results in order
+            for (CompletableFuture<Map.Entry<Long, List<Dialogue>>> future : futures) {
+                try {
+                    Map.Entry<Long, List<Dialogue>> entry = future.get(60, TimeUnit.SECONDS);
+                    results.put(entry.getKey(), entry.getValue());
+                } catch (Exception e) {
+                    log.error("DialogueAgent batch: scene generation timed out or failed: {}", e.getMessage());
+                    // Add empty result for failed scene
+                    results.put(scenes.get(results.size()).getId(), List.of());
+                }
+            }
+
+            log.info("DialogueAgent parallel batch: generated dialogues for {} scenes (parallelism={})",
+                    scenes.size(), parallelism);
+            return results;
+        } finally {
+            executor.shutdownNow();
         }
-
-        log.info("DialogueAgent batch-generated dialogues for {} scenes", scenes.size());
-        return results;
     }
 
     // ── Prompt Construction ─────────────────────────────
@@ -252,6 +289,9 @@ public class DialogueAgent {
                 events.add(evt);
             }
             vars.put("sceneEvents", events);
+            vars.put("hasSceneEvents", true);
+        } else {
+            vars.put("hasSceneEvents", false);
         }
 
         // Previous scene summary
@@ -298,12 +338,16 @@ public class DialogueAgent {
         sb.append("""
                 ## 输出格式
 
-                请以 JSON 数组格式输出，每个对话对象包含：
+                请以 JSON 数组格式输出所有角色的对白，按对话顺序排列。每个对话对象包含：
                 - speaker: 说话人姓名
                 - content: 对白内容（每句≤50字）
-                - emotion: 情绪标签（中文）
+                - emotion: 情绪标签（中文，如"平静"、"愤怒"、"悲伤"等）
                 - parenthetical: 括号说明（如"(低声)"、"(冷笑)"、"(犹豫)"，无则填null）
                 - replyTo: 回复的对白序号（从0开始，首句为0）
+
+                ⚠️ 重要：
+                - 如果场景中没有角色之间的直接对话（只有动作/环境/叙事描述），必须返回空数组：[]
+                - 绝对不要编造原文中不存在的对话！
 
                 ```json
                 [{
@@ -315,7 +359,7 @@ public class DialogueAgent {
                 }]
                 ```
 
-                请确保输出是有效的 JSON 数组。
+                请确保输出是有效的 JSON 数组。如果无对话则输出 []。
                 """);
 
         return sb.toString();
@@ -418,33 +462,93 @@ public class DialogueAgent {
         String content = response.getResult().getOutput().getText();
         List<Dialogue> dialogues = new ArrayList<>();
 
+        // Try bare array first: [...]
         String jsonArray = extractJsonArray(content);
-        if (jsonArray == null) {
-            // Try single object
+        if (jsonArray != null) {
+            // Check if it's an empty array
+            if (jsonArray.trim().equals("[]")) {
+                log.info("DialogueAgent: empty array returned for scene '{}' — no dialogue in this scene", scene.getTitle());
+                return dialogues;
+            }
+
+            Pattern dialogPattern = Pattern.compile("\\{[^}]+}");
+            Matcher dialogMatcher = dialogPattern.matcher(jsonArray);
+
+            while (dialogMatcher.find()) {
+                String block = dialogMatcher.group();
+                Dialogue d = parseDialogueBlock(block, scene, characters);
+                if (d != null) {
+                    dialogues.add(d);
+                }
+            }
+
+            if (dialogues.isEmpty()) {
+                // Might be a {"dialogues": [...]} wrapper inside the array text
+                // Try to extract the wrapper's array
+                String innerJson = extractJsonObject(content);
+                if (innerJson != null) {
+                    String wrapperArray = extractJsonField(innerJson, "dialogues");
+                    if (wrapperArray != null && !wrapperArray.isBlank()) {
+                        // Parse the inner array manually
+                        return parseDialogueList(wrapperArray, scene, characters);
+                    }
+                }
+            }
+        } else {
+            // Try {"dialogues": [...]} wrapper
+            String wrapperJson = extractJsonObject(content);
+            if (wrapperJson != null) {
+                String arrayStr = extractJsonField(wrapperJson, "dialogues");
+                if (arrayStr != null && !arrayStr.isBlank()) {
+                    return parseDialogueList(arrayStr, scene, characters);
+                }
+            }
+
+            // Try single object (for suggestNext)
             String singleJson = extractJsonObject(content);
             if (singleJson != null) {
                 Dialogue d = parseDialogueBlock(singleJson, scene, characters);
                 if (d != null) dialogues.add(d);
+            } else {
+                log.warn("DialogueAgent: no JSON found in AI response (first 300 chars): {}",
+                        content.length() > 300 ? content.substring(0, 300) + "..." : content);
             }
-            log.warn("DialogueAgent: no JSON found in AI response");
             return dialogues;
         }
 
-        Pattern dialogPattern = Pattern.compile("\\{[^}]+}");
-        Matcher dialogMatcher = dialogPattern.matcher(jsonArray);
-
-        while (dialogMatcher.find()) {
-            String block = dialogMatcher.group();
-            Dialogue d = parseDialogueBlock(block, scene, characters);
-            if (d != null) {
-                dialogues.add(d);
-            }
+        // If the array parser found nothing useful
+        if (dialogues.isEmpty() && jsonArray == null) {
+            log.warn("DialogueAgent: no JSON found in AI response (first 300 chars): {}",
+                    content.length() > 300 ? content.substring(0, 300) + "..." : content);
         }
 
         // Build replyTo chain
         for (int i = 0; i < dialogues.size(); i++) {
             if (i > 0 && dialogues.get(i).getReplyTo() == null) {
                 dialogues.get(i).setReplyTo(dialogues.get(i - 1).getId());
+            }
+        }
+
+        return dialogues;
+    }
+
+    /**
+     * Parse a JSON string representing an array of dialogue objects.
+     * Handles nested braces within dialogue objects.
+     */
+    private List<Dialogue> parseDialogueList(String jsonText, Scene scene, List<Character> characters) {
+        List<Dialogue> dialogues = new ArrayList<>();
+        if (jsonText == null || jsonText.isBlank()) return dialogues;
+
+        // Find all top-level JSON objects
+        Pattern dialogPattern = Pattern.compile("\\{[^}]+}");
+        Matcher dialogMatcher = dialogPattern.matcher(jsonText);
+
+        while (dialogMatcher.find()) {
+            String block = dialogMatcher.group();
+            Dialogue d = parseDialogueBlock(block, scene, characters);
+            if (d != null) {
+                dialogues.add(d);
             }
         }
 
@@ -523,52 +627,157 @@ public class DialogueAgent {
 
     // ── JSON Helpers ─────────────────────────────────────
 
+    /**
+     * Extract a balanced JSON array from AI response text.
+     * Strips markdown fences and uses bracket-depth tracking.
+     */
     private String extractJsonArray(String text) {
-        Pattern pattern = Pattern.compile("\\[\\s*\\{.*?}\\s*]", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group();
+        // Strip markdown code fences
+        String cleaned = text
+                .replaceAll("```json\\s*", "")
+                .replaceAll("```\\s*", "")
+                .trim();
+
+        int start = cleaned.indexOf('[');
+        if (start == -1) return null;
+
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == '[') depth++;
+            else if (c == ']') {
+                depth--;
+                if (depth == 0) return cleaned.substring(start, i + 1);
+            }
         }
         return null;
     }
 
     private String extractJsonObject(String text) {
-        Pattern pattern = Pattern.compile("\\{[^}]+}");
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group();
+        // Strip markdown fences
+        String cleaned = text
+                .replaceAll("```json\\s*", "")
+                .replaceAll("```\\s*", "")
+                .trim();
+
+        int start = cleaned.indexOf('{');
+        if (start == -1) return null;
+
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == '{') depth++;
+            else if (c == '}') {
+                depth--;
+                if (depth == 0) return cleaned.substring(start, i + 1);
+            }
         }
         return null;
     }
 
+    /**
+     * Extract a JSON field value from a JSON object block.
+     * Handles quoted strings, unquoted values (numbers/bool/null), and escaped quotes.
+     */
     private String extractJsonField(String block, String fieldName) {
-        Pattern p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
-        Matcher m = p.matcher(block);
-        if (m.find()) {
-            return m.group(1).trim();
+        // Find the field key position
+        String keyPattern = "\"" + fieldName + "\"";
+        int keyIdx = block.indexOf(keyPattern);
+        if (keyIdx == -1) return null;
+
+        // Find the colon after the key
+        int colonIdx = block.indexOf(':', keyIdx + keyPattern.length());
+        if (colonIdx == -1) return null;
+
+        // Skip whitespace after colon
+        int valStart = colonIdx + 1;
+        while (valStart < block.length() && java.lang.Character.isWhitespace(block.charAt(valStart))) {
+            valStart++;
         }
-        p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*([^,\\n}]+)");
-        m = p.matcher(block);
-        if (m.find()) {
-            String val = m.group(1).trim();
-            if (val.startsWith("\"") && val.endsWith("\"")) {
-                val = val.substring(1, val.length() - 1);
+        if (valStart >= block.length()) return null;
+
+        char firstChar = block.charAt(valStart);
+
+        // Quoted string value
+        if (firstChar == '"') {
+            StringBuilder sb = new StringBuilder();
+            boolean escaped = false;
+            for (int i = valStart + 1; i < block.length(); i++) {
+                char c = block.charAt(i);
+                if (escaped) {
+                    sb.append(c);
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    return sb.toString();
+                } else {
+                    sb.append(c);
+                }
             }
-            return val;
+            return sb.toString(); // Unterminated string — return what we have
         }
-        return null;
+
+        // Unquoted value (number, true, false, null)
+        StringBuilder sb = new StringBuilder();
+        for (int i = valStart; i < block.length(); i++) {
+            char c = block.charAt(i);
+            if (c == ',' || c == '}' || c == '\n' || c == '\r') break;
+            sb.append(c);
+        }
+        return sb.toString().trim();
     }
 
     private int extractIntField(String block, String fieldName, int defaultValue) {
-        Pattern p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*(\\d+)");
-        Matcher m = p.matcher(block);
-        if (m.find()) {
-            try {
-                return Integer.parseInt(m.group(1));
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
+        String val = extractJsonField(block, fieldName);
+        if (val == null) return defaultValue;
+        try {
+            return Integer.parseInt(val);
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
-        return defaultValue;
+    }
+
+    /**
+     * Log token usage from ChatResponse metadata.
+     */
+    private void logTokenUsage(ChatResponse response, String prompt, String taskName) {
+        try {
+            if (response.getMetadata() != null && response.getMetadata().getUsage() != null) {
+                var usage = response.getMetadata().getUsage();
+                long promptTokens = usage.getPromptTokens();
+                long completionTokens = usage.getCompletionTokens();
+                long totalTokens = usage.getTotalTokens();
+                String model = response.getMetadata().getModel() != null
+                        ? response.getMetadata().getModel() : "unknown";
+
+                log.info("📊 Token usage [{}] model={}: prompt={} completion={} total={} | prompt_chars={}",
+                        taskName, model, promptTokens, completionTokens, totalTokens,
+                        prompt != null ? prompt.length() : 0);
+            } else {
+                log.debug("📊 Token usage [{}] — no usage metadata in response (prompt_chars={})",
+                        taskName, prompt != null ? prompt.length() : 0);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to extract token usage for [{}]: {}", taskName, e.getMessage());
+        }
     }
 }

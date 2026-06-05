@@ -24,8 +24,9 @@ export function UploadZone() {
         const data = await uploadNovel(file);
         router.push(`/scripts/new?novelId=${data.novelId}`);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : '上传失败，请重试';
-        setError(message);
+        const detail = (err as { detail?: string }).detail;
+        const message = err instanceof Error ? err.message : '上传失败，请检查后端服务';
+        setError(detail ?? message);
       } finally {
         setUploading(false);
       }
