@@ -3,8 +3,11 @@ package com.novel2script.infrastructure.config;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.OpenAiEmbeddingModel;
+import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -105,5 +108,49 @@ public class SpringAiConfig {
         chatModels.forEach((name, model) ->
                 clients.put(name, ChatClient.builder(model).build()));
         return clients;
+    }
+
+    // ── EmbeddingModel bean (optional) ───────────────────
+
+    /**
+     * Create an {@link EmbeddingModel} using the default provider (deepseek).
+     * If no API key is configured, returns null and EmbeddingService will use hash-based fallback.
+     *
+     * @return EmbeddingModel or null if not configured
+     */
+    @Bean
+    @org.springframework.context.annotation.Primary
+    public EmbeddingModel embeddingModel() {
+        String defaultProvider = multiModelProperties.getDefaultProvider();
+        MultiModelProperties.ProviderConfig config = multiModelProperties.getProviders().get(defaultProvider);
+
+        if (config == null || config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("No API key configured for default provider '{}', EmbeddingModel will not be created", defaultProvider);
+            return null;
+        }
+
+        try {
+            OpenAiApi api = OpenAiApi.builder()
+                    .baseUrl(config.getBaseUrl())
+                    .apiKey(config.getApiKey())
+                    .build();
+
+            OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
+                    .model("deepseek-embedding")
+                    .build();
+
+            OpenAiEmbeddingModel embeddingModel = new OpenAiEmbeddingModel(
+                    api,
+                    org.springframework.ai.document.MetadataMode.EMBED,
+                    options
+            );
+
+            log.info("✅ Created EmbeddingModel for provider: {}", defaultProvider);
+            return embeddingModel;
+        } catch (Exception e) {
+            log.warn("Failed to create EmbeddingModel for provider '{}': {}. Using hash-based fallback.",
+                    defaultProvider, e.getMessage());
+            return null;
+        }
     }
 }

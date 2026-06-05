@@ -35,7 +35,7 @@ public class EmbeddingService {
      *
      * @param embeddingModel may be {@code null} if no embedding provider is configured
      */
-    public EmbeddingService(EmbeddingModel embeddingModel) {
+    public EmbeddingService(@org.springframework.lang.Nullable EmbeddingModel embeddingModel) {
         this.embeddingModel = embeddingModel;
         if (embeddingModel != null) {
             log.info("EmbeddingService initialized with EmbeddingModel: {}", embeddingModel);
