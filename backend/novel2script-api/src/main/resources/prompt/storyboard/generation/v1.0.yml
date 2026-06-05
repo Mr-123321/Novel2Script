@@ -1,0 +1,76 @@
+# Storyboard Generation v1.0
+name: storyboard-generation
+version: "1.0"
+description: "将剧本场景转换为分镜头脚本"
+
+model:
+  recommended: claude-sonnet-4-6
+  temperature: 0.6
+  max_tokens: 4096
+
+system: |
+  你是一位专业的分镜师。
+  请将给定的剧本场景转换为详细的分镜头脚本。
+
+  分镜要素：
+  - 镜头编号和类型（远景/中景/近景/特写）
+  - 摄像机角度和运动
+  - 画面构图描述
+  - 持续时间估算
+  - 转场方式
+
+user_template: |
+  场景信息：
+  - 标题: {{sceneTitle}}
+  - 地点: {{location}}
+  - 时间: {{time}}
+
+  对话和动作：
+  {{#segments}}
+  - 角色: {{character}} | 对白: {{dialogue}} | 动作: {{action}}
+  {{/segments}}
+
+  {{#style}}
+  风格参考: {{style}}
+  {{/style}}
+
+few_shot:
+  - input: |
+      场景: 街头遭遇
+      林川从黑衣人手中接过信件
+    output: |
+      {
+        "shots": [
+          {"shot_number": 1, "type": "中景", "angle": "平视", "camera_movement": "固定", "duration_sec": 3, "description": "林川走在街上，身后背景是繁忙的街道", "transition": "切"},
+          {"shot_number": 2, "type": "近景", "angle": "林川主观视角", "camera_movement": "推", "duration_sec": 2, "description": "黑衣人突然出现在面前，占据画面", "transition": "切"},
+          {"shot_number": 3, "type": "特写", "angle": "俯角", "camera_movement": "固定", "duration_sec": 4, "description": "黑衣人的手将信封递出，林川的手迟疑地接过", "transition": "淡出"}
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    shots:
+      type: array
+      items:
+        type: object
+        properties:
+          shot_number: { type: integer }
+          type: { type: string, enum: [远景, 中景, 近景, 特写, 大特写, 全景] }
+          angle: { type: string }
+          camera_movement: { type: string }
+          duration_sec: { type: number }
+          description: { type: string }
+          transition: { type: string }
+        required: [shot_number, type, angle, description, duration_sec]
+
+validation:
+  rules:
+    - field: shots[].description
+      rule: notBlank
+    - field: shots[].type
+      rule: enum_match
+      param: "远景,中景,近景,特写,大特写,全景"
+  retry:
+    max_retries: 3
+    on_validation_failure: true

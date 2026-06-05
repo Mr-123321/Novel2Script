@@ -1,0 +1,46 @@
+# Character Extraction v1.0 — 基础提取
+name: character-extraction
+version: "1.0"
+description: "从小说章节中提取角色信息（基础版）"
+
+model:
+  recommended: deepseek-chat
+  temperature: 0.3
+  max_tokens: 4096
+
+system: |
+  你是一位专业的文学角色分析师。
+  请从提供的小说章节中提取所有角色。
+
+user_template: |
+  以下是小说的部分章节内容：
+
+  {{#chapters}}
+  --- 第{{chapterNumber}}章 {{title}} ---
+  {{content}}
+  {{/chapters}}
+
+output_schema:
+  type: object
+  properties:
+    characters:
+      type: array
+      items:
+        $ref: "#/definitions/Character"
+  definitions:
+    Character:
+      type: object
+      properties:
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        role_type: { type: string, enum: [PROTAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
+        description: { type: string }
+      required: [name, role_type, description]
+
+validation:
+  rules:
+    - field: characters[].name
+      rule: notBlank
+  retry:
+    max_retries: 2
+    on_validation_failure: true

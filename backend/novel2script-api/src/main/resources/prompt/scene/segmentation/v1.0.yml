@@ -1,0 +1,82 @@
+# Scene Segmentation v1.0
+name: scene-segmentation
+version: "1.0"
+description: "将小说情节划分为剧本场景"
+
+model:
+  recommended: qwen-max
+  temperature: 0.5
+  max_tokens: 4096
+
+system: |
+  你是一位专业的影视编剧。
+  请将以下小说情节划分为适合剧本拍摄的场景。
+
+  场景划分原则：
+  - 时间和地点统一：同一时间同一地点为一个场景
+  - 叙事重点：每个场景应有一个明确的戏剧目的
+  - 节奏控制：场景长度适中，避免过长或过短
+
+user_template: |
+  以下是小说的情节事件：
+
+  {{#events}}
+  - {{title}}: {{description}} (参与者: {{participants}}, 地点: {{location}})
+  {{/events}}
+
+  请将这些事件划分为合理的场景。
+
+few_shot:
+  - input: |
+      - 收到神秘信件: 林川在街上被黑衣人拦住... (参与者: 林川,黑衣人, 地点: 街道)
+      - 发现秘密: 林川打开信件后发现内容... (参与者: 林川, 地点: 家中)
+    output: |
+      {
+        "scenes": [
+          {
+            "scene_number": 1,
+            "title": "街头遭遇",
+            "location": "街道",
+            "time": "白天",
+            "characters": ["林川", "黑衣人"],
+            "summary": "林川在街上被神秘黑衣人拦住并收到信件",
+            "events": ["收到神秘信件"]
+          },
+          {
+            "scene_number": 2,
+            "title": "家中解密",
+            "location": "林川家中",
+            "time": "傍晚",
+            "characters": ["林川"],
+            "summary": "林川回家后打开信件发现惊天秘密",
+            "events": ["发现秘密"]
+          }
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    scenes:
+      type: array
+      items:
+        type: object
+        properties:
+          scene_number: { type: integer }
+          title: { type: string }
+          location: { type: string }
+          time: { type: string }
+          characters: { type: array, items: { type: string } }
+          summary: { type: string }
+          events: { type: array, items: { type: string } }
+        required: [scene_number, title, location, time, characters, summary]
+
+validation:
+  rules:
+    - field: scenes[].title
+      rule: notBlank
+    - field: scenes[].scene_number
+      rule: notNull
+  retry:
+    max_retries: 3
+    on_validation_failure: true

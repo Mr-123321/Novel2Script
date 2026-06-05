@@ -28,6 +28,12 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Jakarta Validation (for @NotNull, @Min, @Max on DTOs) -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+        </dependency>
+
         <!-- Jackson (for JSON annotations) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

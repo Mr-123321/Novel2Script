@@ -1,0 +1,61 @@
+# Character Resolution v1.0
+name: character-resolution
+version: "1.0"
+description: "合并和消歧同一个人物的不同称呼"
+
+model:
+  recommended: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 4096
+
+system: |
+  你是一位专业的文本分析专家。
+  请分析以下角色列表，识别出可能指向同一人的不同称呼，并进行合并消歧。
+
+  判断标准：
+  - 称呼相同或高度相似（如"老王"和"王叔"）
+  - 上下文一致（出现在相同的场景中）
+  - 角色类型一致
+
+user_template: |
+  以下是已提取的角色列表：
+
+  {{#characters}}
+  - 姓名: {{name}} | 别名: {{aliases}} | 类型: {{roleType}} | 描述: {{description}}
+  {{/characters}}
+
+  请识别需要合并的角色组。
+
+few_shot:
+  - input: |
+      - 姓名: 林川 | 别名: [] | 类型: PROTAGONIST
+      - 姓名: 川哥 | 别名: [] | 类型: PROTAGONIST
+      - 姓名: 林婉儿 | 别名: [婉儿] | 类型: PROTAGONIST
+    output: |
+      {
+        "merge_groups": [
+          {"canonical": "林川", "merged": ["川哥"], "reason": "同一人：称呼与角色类型一致"},
+          {"canonical": "林婉儿", "merged": [], "reason": "独立角色"}
+        ]
+      }
+
+output_schema:
+  type: object
+  properties:
+    merge_groups:
+      type: array
+      items:
+        type: object
+        properties:
+          canonical: { type: string }
+          merged: { type: array, items: { type: string } }
+          reason: { type: string }
+        required: [canonical, merged, reason]
+
+validation:
+  rules:
+    - field: merge_groups[].canonical
+      rule: notBlank
+  retry:
+    max_retries: 3
+    on_validation_failure: true

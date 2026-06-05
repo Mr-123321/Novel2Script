@@ -1,0 +1,34 @@
+name: test-simple
+version: "1.0"
+description: "A simple test prompt template"
+
+model:
+  recommended: deepseek-chat
+  temperature: 0.5
+  max_tokens: 1024
+
+system: |
+  你是一个测试助手。
+
+user_template: |
+  请回答以下问题：{{question}}
+
+few_shot:
+  - input: "What is 1+1?"
+    output: "答案是 2"
+  - input: "What color is the sky?"
+    output: "天空是蓝色的"
+
+output_schema:
+  type: object
+  properties:
+    answer:
+      type: string
+
+validation:
+  rules:
+    - field: answer
+      rule: notBlank
+  retry:
+    max_retries: 2
+    on_validation_failure: true
