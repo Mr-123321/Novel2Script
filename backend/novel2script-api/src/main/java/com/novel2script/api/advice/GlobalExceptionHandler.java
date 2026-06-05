@@ -3,13 +3,20 @@ package com.novel2script.api.advice;
 import com.novel2script.common.exception.AgentRetryException;
 import com.novel2script.common.exception.BusinessException;
 import com.novel2script.common.exception.ExportException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.stream.Collectors;
@@ -17,10 +24,59 @@ import java.util.stream.Collectors;
 /**
  * Global exception handler for the REST API.
  * Converts exceptions to RFC 7807 Problem Details.
+ *
+ * <p>SSE (text/event-stream) endpoints are deliberately excluded
+ * from the general handler — their errors are handled inside
+ * the controller's scheduled task to avoid response-type conflicts.
  */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // ───────────────────────────── SSE exclusion ─────────────────────────────
+
+    /**
+     * ClientAbortException — client disconnected from SSE stream.
+     * This is normal lifecycle, not an application error.
+     * Return {@code null} to let the connection die cleanly.
+     */
+    @ExceptionHandler(ClientAbortException.class)
+    public Object handleClientAbort(ClientAbortException ex, HttpServletRequest request) {
+        if (isSseRequest(request)) {
+            log.debug("SSE client disconnected: {}", request.getRequestURI());
+            return SseEmitter.event().comment("disconnected").data("").build(); // no-op sentinel
+        }
+        // Fall back to general handler for non-SSE ClientAbort
+        return handleGeneral(ex);
+    }
+
+    /**
+     * AsyncRequestNotUsableException — Spring's wrapper for broken async pipes.
+     * Same treatment as ClientAbortException.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public Object handleAsyncNotUsable(AsyncRequestNotUsableException ex, HttpServletRequest request) {
+        if (isSseRequest(request)) {
+            log.debug("SSE async request not usable: {}", request.getRequestURI());
+            return null;
+        }
+        return handleGeneral(ex);
+    }
+
+    /**
+     * IOException at the controller level — often a broken SSE pipe.
+     */
+    @ExceptionHandler(IOException.class)
+    public Object handleIOException(IOException ex, HttpServletRequest request) {
+        if (isSseRequest(request)) {
+            log.info("SSE I/O closed for client: {}", request.getRequestURI());
+            return SseEmitter.event().comment("closed").data("").build();
+        }
+        log.warn("I/O exception on non-SSE endpoint: {}", ex.getMessage());
+        return handleGeneral(ex);
+    }
+
+    // ──────────────────────── Business exceptions ────────────────────────────
 
     @ExceptionHandler(BusinessException.class)
     public ProblemDetail handleBusinessException(BusinessException ex) {
@@ -83,6 +139,8 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // ──────────────────────────── Catch-all ──────────────────────────────────
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneral(Exception ex) {
         log.error("Unhandled exception", ex);
@@ -94,5 +152,21 @@ public class GlobalExceptionHandler {
         problem.setProperty("timestamp", Instant.now().toString());
         problem.setType(URI.create("about:blank"));
         return problem;
+    }
+
+    // ────────────────────────────── helpers ──────────────────────────────────
+
+    /**
+     * Returns true if the current request produces {@code text/event-stream}.
+     */
+    private boolean isSseRequest(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        // Path-based check: any endpoint with "progress" in the path is SSE
+        if (path != null && path.contains("progress")) {
+            return true;
+        }
+        // Accept-header check
+        String accept = request.getHeader(HttpHeaders.ACCEPT);
+        return accept != null && accept.contains(MediaType.TEXT_EVENT_STREAM_VALUE);
     }
 }

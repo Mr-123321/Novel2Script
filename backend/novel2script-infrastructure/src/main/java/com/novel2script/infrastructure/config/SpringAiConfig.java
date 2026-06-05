@@ -12,6 +12,9 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -37,6 +40,20 @@ public class SpringAiConfig {
         this.multiModelProperties = multiModelProperties;
     }
 
+    /**
+     * Custom {@link RestClient.Builder} with HTTP timeouts.
+     * Prevents AI API calls from hanging indefinitely.
+     * connect timeout = 5s, read timeout = 30s (balanced for AI response time).
+     */
+    @Bean
+    @Primary
+    public RestClient.Builder restClientBuilder() {
+        var requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(5_000);   // 5 seconds
+        requestFactory.setReadTimeout(30_000);      // 30 seconds
+        return RestClient.builder().requestFactory(requestFactory);
+    }
+
     // ── ChatModel beans (one per provider) ───────────────
 
     /**
@@ -45,13 +62,13 @@ public class SpringAiConfig {
      * @return a map of provider-name → ChatModel (only providers with API keys)
      */
     @Bean
-    public Map<String, ChatModel> chatModels() {
+    public Map<String, ChatModel> chatModels(RestClient.Builder restClientBuilder) {
         Map<String, ChatModel> models = new HashMap<>();
 
         multiModelProperties.getProviders().forEach((name, config) -> {
             // Skip providers without API keys
             if (config.getApiKey() == null || config.getApiKey().isBlank()) {
-                log.debug("Skipping provider '{}' - no API key configured", name);
+                log.info("⏭️  Provider '{}' skipped — no API key configured", name);
                 return;
             }
 
@@ -59,9 +76,11 @@ public class SpringAiConfig {
                 MultiModelProperties.ChatOptions opts = config.getChat().getOptions();
 
                 // Build OpenAiApi targeting this provider's base URL
+                // Use the custom RestClient.Builder with timeouts
                 OpenAiApi api = OpenAiApi.builder()
                         .baseUrl(config.getBaseUrl())
                         .apiKey(config.getApiKey())
+                        .restClientBuilder(restClientBuilder)
                         .build();
 
                 // Build chat options from YAML config
@@ -77,7 +96,8 @@ public class SpringAiConfig {
                         .build();
 
                 models.put(name, chatModel);
-                log.info("✅ Created ChatModel for provider: {}", name);
+                log.info("✅ ChatModel ready: {} ({}) timeout: connect=5s read=30s",
+                        name, opts.getModel());
             } catch (Exception e) {
                 log.error("❌ Failed to create ChatModel for provider '{}': {}", name, e.getMessage());
                 throw new IllegalStateException(
@@ -93,7 +113,7 @@ public class SpringAiConfig {
                 "No AI providers are properly configured. Please add at least one provider with a valid API key in application-dev.yml");
         }
 
-        log.info("📊 Total ChatModels initialized: {}", models.size());
+        log.info("📊 Total ChatModels initialized: {}, available: {}", models.size(), models.keySet());
         return models;
     }
 

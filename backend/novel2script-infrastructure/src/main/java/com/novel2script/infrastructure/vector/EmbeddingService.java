@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -38,9 +39,9 @@ public class EmbeddingService {
     public EmbeddingService(@org.springframework.lang.Nullable EmbeddingModel embeddingModel) {
         this.embeddingModel = embeddingModel;
         if (embeddingModel != null) {
-            log.info("EmbeddingService initialized with EmbeddingModel: {}", embeddingModel);
+            log.info("✅ EmbeddingService initialized with EmbeddingModel: {}", embeddingModel.getClass().getSimpleName());
         } else {
-            log.info("EmbeddingService: no EmbeddingModel available, using hash-based fallback");
+            log.info("⚠️  EmbeddingService: no EmbeddingModel available, using hash-based fallback for development/testing");
         }
     }
 

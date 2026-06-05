@@ -3,16 +3,44 @@
 import { useScriptStore } from '@/stores/script-store';
 import { sceneHeader, cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { MapPin, Clock, MessageSquare } from 'lucide-react';
-import type { Scene } from '@/types/script';
+import { DialogueBlock } from './DialogueBlock';
+import { ActionBlock } from './ActionBlock';
+import { MapPin, Clock, MessageSquare, Users } from 'lucide-react';
+import type { Scene, Dialogue, Action } from '@/types/script';
+import type { Character } from '@/types/character';
 
 interface SceneCardProps {
   scene: Scene;
+  selected?: boolean;
 }
 
-export function SceneCard({ scene }: SceneCardProps) {
-  const { selectedSceneId, selectScene } = useScriptStore();
-  const isSelected = selectedSceneId === scene.id;
+/** Sorted combined content items */
+function getSortedContent(scene: Scene): Array<
+  { type: 'action'; item: Action } | { type: 'dialogue'; item: Dialogue }
+> {
+  const items: Array<
+    { type: 'action'; item: Action } | { type: 'dialogue'; item: Dialogue }
+  > = [
+    ...scene.actions.map((a) => ({ type: 'action' as const, item: a })),
+    ...scene.dialogues.map((d) => ({ type: 'dialogue' as const, item: d })),
+  ];
+  items.sort((a, b) => a.item.sequence - b.item.sequence);
+  return items;
+}
+
+export function SceneCard({ scene, selected }: SceneCardProps) {
+  const { selectedSceneId, selectScene, script } = useScriptStore();
+  const isSelected = selected ?? (selectedSceneId === scene.id);
+
+  const contentItems = getSortedContent(scene);
+
+  // Map characterIds to character names
+  const characterMap = new Map(
+    (script?.characters ?? []).map((c) => [c.id, c] as const)
+  );
+  const sceneCharacters = (scene.characterIds ?? [])
+    .map((id) => characterMap.get(id))
+    .filter((c) => c !== undefined);
 
   return (
     <div
@@ -37,10 +65,12 @@ export function SceneCard({ scene }: SceneCardProps) {
               </span>
             )}
           </h3>
-          <div className="flex items-center gap-4 text-xs text-muted-foreground mt-2 ml-8">
+          <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-2 ml-8">
             <span className="flex items-center gap-1.5">
               <MapPin className="h-3 w-3" />
-              <span className="truncate max-w-[200px]">{sceneHeader(scene)}</span>
+              <span className="truncate max-w-[240px]">
+                {scene.sceneHeading ?? sceneHeader(scene)}
+              </span>
             </span>
             <span className="flex items-center gap-1.5">
               <Clock className="h-3 w-3" /> {scene.timeOfDay}
@@ -50,12 +80,29 @@ export function SceneCard({ scene }: SceneCardProps) {
             </span>
           </div>
         </div>
-        {scene.mood && (
-          <Badge variant="secondary" className="text-[11px] shrink-0">
-            {scene.mood}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {scene.mood && (
+            <Badge variant="secondary" className="text-[11px]">
+              {scene.mood}
+            </Badge>
+          )}
+        </div>
       </div>
+
+      {/* Characters in this scene */}
+      {sceneCharacters.length > 0 && (
+        <div className="flex items-center gap-1.5 mb-3 ml-8 flex-wrap">
+          <Users className="h-3 w-3 text-muted-foreground shrink-0" />
+          {sceneCharacters.map((c) => (
+            <span
+              key={c.id}
+              className="inline-flex text-[11px] px-1.5 py-0.5 rounded-md bg-teal-500/10 text-teal-400 font-medium"
+            >
+              {c.canonicalName}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Summary */}
       {scene.summary && (
@@ -64,44 +111,15 @@ export function SceneCard({ scene }: SceneCardProps) {
         </p>
       )}
 
-      {/* Actions & Dialogues */}
-      <div className="space-y-3 ml-8">
-        {[...scene.actions, ...scene.dialogues]
-          .sort((a, b) => a.sequence - b.sequence)
-          .map((item) => {
-            if ('actionType' in item) {
-              return (
-                <p
-                  key={`action-${item.id}`}
-                  className="text-sm text-muted-foreground/70 italic leading-relaxed"
-                >
-                  [{item.description}]
-                </p>
-              );
-            }
-            return (
-              <div
-                key={`dialogue-${item.id}`}
-                className="text-sm leading-relaxed group/dialogue"
-              >
-                <span className="font-semibold text-teal-400">
-                  {item.speaker}
-                </span>
-                {item.emotion && (
-                  <span className="text-muted-foreground text-xs ml-1.5">
-                    ({item.emotion})
-                  </span>
-                )}
-                {item.parenthetical && (
-                  <span className="text-muted-foreground/60 text-xs ml-1">
-                    {item.parenthetical}
-                  </span>
-                )}
-                <span className="mx-1.5 text-muted-foreground/30">:</span>
-                <span>{item.content}</span>
-              </div>
-            );
-          })}
+      {/* Actions & Dialogues — sorted by sequence */}
+      <div className="space-y-1 ml-8">
+        {contentItems.map(({ type, item }) =>
+          type === 'action' ? (
+            <ActionBlock key={`action-${item.id}`} action={item} />
+          ) : (
+            <DialogueBlock key={`dialogue-${item.id}`} dialogue={item} />
+          )
+        )}
       </div>
 
       {/* Selected indicator line */}

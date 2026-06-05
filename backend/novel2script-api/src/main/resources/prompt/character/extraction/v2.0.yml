@@ -15,8 +15,9 @@ system: |
 
   分析要点：
   - 识别角色的性格特征（勇气、智慧、野心、善良等）
-  - 推断角色之间的关系（朋友、敌人、家人、恋人等）
+  - **必须推断角色之间的关系**（朋友、敌人、家人、恋人、师徒等），即使小说未明确写出，也要根据角色互动推断
   - 判断角色类型（主角、反派、配角、次要角色）
+  - 关系字段不要留空！对每个主要角色至少列出1-2个关系
 
 user_template: |
   以下是小说的部分章节内容：
@@ -33,19 +34,46 @@ user_template: |
 few_shot:
   - input: |
       第1章 穿越
-      林川睁开眼睛，发现自己躺在一张陌生的床上。他记得自己昨晚还在图书馆准备考试...
+      林川睁开眼睛，发现自己躺在一张陌生的床上。他记得自己昨晚还在图书馆准备考试。门外传来脚步声，他的室友老王推门进来："你小子终于醒了！"林川还没来得及回答，手机响了——是他暗恋已久的学妹苏晴。
     output: |
       {
         "characters": [
           {
             "name": "林川",
-            "aliases": [],
+            "aliases": ["川哥"],
             "role_type": "PROTAGONIST",
             "gender": "男",
             "age_range": "20-25",
             "personality": ["好奇心强", "适应力强", "理性"],
             "description": "大学生，意外穿越到异世界，拥有现代知识",
-            "relationships": []
+            "relationships": [
+              {"target": "老王", "relation": "室友"},
+              {"target": "苏晴", "relation": "暗恋对象"}
+            ]
+          },
+          {
+            "name": "老王",
+            "aliases": [],
+            "role_type": "SUPPORTING",
+            "gender": "男",
+            "age_range": "22-25",
+            "personality": ["热情", "大大咧咧"],
+            "description": "林川的大学室友，性格开朗",
+            "relationships": [
+              {"target": "林川", "relation": "室友"}
+            ]
+          },
+          {
+            "name": "苏晴",
+            "aliases": [],
+            "role_type": "SUPPORTING",
+            "gender": "女",
+            "age_range": "20-23",
+            "personality": ["温柔", "善良", "内向"],
+            "description": "林川的学妹，成绩优秀",
+            "relationships": [
+              {"target": "林川", "relation": "学长"}
+            ]
           }
         ]
       }

@@ -171,6 +171,8 @@ public class ActionAgent {
         try {
             ChatResponse response = model.call(
                     new Prompt(new org.springframework.ai.chat.messages.UserMessage(prompt)));
+            // Log token usage
+            logTokenUsage(response, prompt);
             String content = response.getResult().getOutput().getText();
             Map<Integer, String> seqToCharName = new HashMap<>();
             List<Action> actions = parseActionsWithNames(content, scene.getId(), seqToCharName);
@@ -662,5 +664,27 @@ public class ActionAgent {
     private static String truncate(String s, int maxLen) {
         if (s == null) return null;
         return s.length() > maxLen ? s.substring(0, maxLen) + "..." : s;
+    }
+
+    /**
+     * Log token usage from ChatResponse metadata.
+     */
+    private void logTokenUsage(ChatResponse response, String prompt) {
+        try {
+            if (response.getMetadata() != null && response.getMetadata().getUsage() != null) {
+                var usage = response.getMetadata().getUsage();
+                long promptTokens = usage.getPromptTokens();
+                long completionTokens = usage.getCompletionTokens();
+                long totalTokens = usage.getTotalTokens();
+                String model = response.getMetadata().getModel() != null
+                        ? response.getMetadata().getModel() : "unknown";
+
+                log.info("📊 Token usage [action-generation] model={}: prompt={} completion={} total={} | prompt_chars={}",
+                        model, promptTokens, completionTokens, totalTokens,
+                        prompt != null ? prompt.length() : 0);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to extract token usage [action-generation]: {}", e.getMessage());
+        }
     }
 }

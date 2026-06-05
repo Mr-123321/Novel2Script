@@ -155,9 +155,12 @@ public class PlotExtractionAgent {
         // Try to use registered prompt template
         PromptTemplate template = promptRegistry.getLatest("plot-extraction");
         if (template != null) {
+            List<Map<String, Object>> chapterList = buildChapterList(chapters);
+            List<Map<String, String>> characterList = buildCharacterList(knownCharacters);
             Map<String, Object> vars = new HashMap<>();
-            vars.put("chapters", buildChapterList(chapters));
-            vars.put("characters", buildCharacterList(knownCharacters));
+            vars.put("chapters", chapterList);
+            vars.put("characters", characterList);
+            vars.put("hasCharacters", characterList != null && !characterList.isEmpty());
             vars.put("conflict_types", buildConflictTypeDescriptions());
             return template.renderUserTemplate(vars);
         }
@@ -209,22 +212,24 @@ public class PlotExtractionAgent {
 
                 ## 提取要求
 
-                1. **事件粒度**: 以"情节转折点"为单位提取，不要太细碎
+                1. **事件粒度**: 以"情节转折点"为单位提取，不要太平凡也不要太细碎。一般每章提取1-4个主要事件即可。
+
                 2. **每个事件必须包含**:
-                   - title: 事件标题（简洁，10字以内）
-                   - description: 详细描述（50-200字）
-                   - location: 发生地点
+                   - eventOrder: 事件序号（从1开始递增）
+                   - title: 事件标题（简洁，10字以内，概括核心事件）
+                   - description: 详细描述（50-200字，说明发生了什么、为什么重要）
+                   - location: 发生地点（具体地点名词）
                    - timePoint: 时间点描述
                    - conflictType: 冲突类型
-                   - participants: 参与角色名列表
+                   - participants: 参与角色名列表（必须使用已知角色列表中的准确名字）
                    - importance: 重要程度 (1-5)
                    - emotionalArc: 情绪变化方向
 
                 3. **重要程度评分标准**:
-                   - 5: 改变故事走向的核心转折（如主角死亡、重大背叛）
-                   - 4: 重要的情节推动事件（如关键战斗、重要决定）
-                   - 3: 有明显推动的普通事件
-                   - 2: 过渡性事件（日常对话、赶路）
+                   - 5: 改变故事走向的核心转折（如主角死亡、重大背叛、能力觉醒）
+                   - 4: 重要的情节推动事件（如关键战斗、重要决定、真相揭露）
+                   - 3: 有明显推动的普通事件（如新角色登场、获得线索）
+                   - 2: 过渡性事件（日常对话、赶路、环境描写）
                    - 1: 极次要的背景事件
 
                 4. **冲突类型定义**:
@@ -243,6 +248,8 @@ public class PlotExtractionAgent {
 
                 6. **按时间顺序输出**，确保 eventOrder 从小到大排列
 
+                7. **重要**: participants 中的人名必须使用上述"已知角色列表"中的准确名字，不要自己编造
+
                 """);
 
         // Append known characters for reference
@@ -254,7 +261,7 @@ public class PlotExtractionAgent {
                         c.getRoleType() != null ? c.getRoleType().name() : "未知",
                         c.getDescription() != null ? c.getDescription() : ""));
             }
-            sb.append("\n请尽量将参与者映射到以上已知角色名。\n\n");
+            sb.append("\n请务必使用以上准确的角色名作为 participants。\n\n");
         }
 
         // Append chapter content
@@ -286,7 +293,7 @@ public class PlotExtractionAgent {
                 }]
                 ```
 
-                请确保输出是有效的 JSON 数组。
+                请确保输出是有效的 JSON 数组。不要输出额外的注释或说明文字。
                 """);
 
         return sb.toString();
@@ -303,16 +310,14 @@ public class PlotExtractionAgent {
         // Extract JSON array from response
         String jsonArray = extractJsonArray(content);
         if (jsonArray == null) {
-            log.warn("PlotExtractionAgent: no JSON array found in AI response");
+            log.warn("PlotExtractionAgent: no JSON array found in AI response (first 300 chars): {}",
+                    content.length() > 300 ? content.substring(0, 300) + "..." : content);
             return events;
         }
 
-        // Parse each event object
-        Pattern eventPattern = Pattern.compile("\\{[^}]+}");
-        Matcher eventMatcher = eventPattern.matcher(jsonArray);
-
-        while (eventMatcher.find()) {
-            String block = eventMatcher.group();
+        // Parse each event object using bracket-aware matching
+        List<String> blocks = extractJsonObjects(jsonArray);
+        for (String block : blocks) {
             try {
                 PlotEvent event = parseEventBlock(block, chapters, knownCharacters);
                 if (event != null) {
@@ -323,19 +328,52 @@ public class PlotExtractionAgent {
             }
         }
 
+        if (events.isEmpty() && !blocks.isEmpty()) {
+            log.warn("PlotExtractionAgent: found {} JSON objects but 0 parsed — first block: {}",
+                    blocks.size(),
+                    blocks.get(0).length() > 200 ? blocks.get(0).substring(0, 200) + "..." : blocks.get(0));
+        }
+
         // Sort by eventOrder
         events.sort(Comparator.comparingInt(PlotEvent::getEventOrder));
         return events;
     }
 
     private String extractJsonArray(String text) {
-        // Try to find JSON array in response
-        Pattern pattern = Pattern.compile("\\[\\s*\\{.*?}\\s*]", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group();
+        // Strip markdown code fences first
+        String cleaned = text
+                .replaceAll("```json\\s*", "")
+                .replaceAll("```\\s*", "")
+                .trim();
+
+        // Find the outermost JSON array by bracket matching
+        int start = cleaned.indexOf('[');
+        if (start == -1) {
+            log.warn("PlotExtractionAgent: no '[' found in AI response (first 200 chars): {}",
+                    text.length() > 200 ? text.substring(0, 200) + "..." : text);
+            return null;
         }
-        return null;
+
+        int depth = 0;
+        int end = -1;
+        for (int i = start; i < cleaned.length(); i++) {
+            char ch = cleaned.charAt(i);
+            if (ch == '[') depth++;
+            else if (ch == ']') {
+                depth--;
+                if (depth == 0) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+
+        if (end == -1) {
+            log.warn("PlotExtractionAgent: no matching ']' found");
+            return null;
+        }
+
+        return cleaned.substring(start, end + 1);
     }
 
     private PlotEvent parseEventBlock(String block, List<Chapter> chapters,
@@ -381,40 +419,118 @@ public class PlotExtractionAgent {
 
     // ── Field extraction helpers ────────────────────────
 
-    private String extractJsonField(String block, String fieldName) {
-        // Match "fieldName": "value" or "fieldName": value
-        Pattern p = Pattern.compile(
-                "\"" + fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
-        Matcher m = p.matcher(block);
-        if (m.find()) {
-            return m.group(1).trim();
-        }
-
-        // Try without quotes (for numbers)
-        p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*([^,\\n}]+)");
-        m = p.matcher(block);
-        if (m.find()) {
-            String val = m.group(1).trim();
-            // Remove trailing quotes if any
-            if (val.startsWith("\"") && val.endsWith("\"")) {
-                val = val.substring(1, val.length() - 1);
+    /**
+     * Extract individual JSON objects from a JSON array string.
+     * Uses bracket-depth tracking to handle nested braces correctly.
+     */
+    private List<String> extractJsonObjects(String jsonArray) {
+        List<String> objects = new ArrayList<>();
+        int i = 0;
+        while (i < jsonArray.length()) {
+            if (jsonArray.charAt(i) == '{') {
+                int depth = 0;
+                boolean inString = false;
+                boolean escaped = false;
+                int start = i;
+                while (i < jsonArray.length()) {
+                    char c = jsonArray.charAt(i);
+                    if (inString) {
+                        if (escaped) escaped = false;
+                        else if (c == '\\') escaped = true;
+                        else if (c == '"') inString = false;
+                    } else {
+                        if (c == '"') inString = true;
+                        else if (c == '{') depth++;
+                        else if (c == '}') {
+                            depth--;
+                            if (depth == 0) {
+                                objects.add(jsonArray.substring(start, i + 1));
+                                i++;
+                                break;
+                            }
+                        }
+                    }
+                    i++;
+                }
+            } else {
+                i++;
             }
-            return val;
+        }
+        return objects;
+    }
+
+    private String extractJsonField(String block, String fieldName) {
+        // First try exact key match
+        String val = extractJsonFieldByKey(block, fieldName);
+        if (val != null) return val;
+
+        // Fallback: try common alternative names
+        Map<String, String> aliases = Map.of(
+            "title", "event_title",
+            "description", "detail",
+            "location", "place",
+            "eventOrder", "event_order"
+        );
+        String altKey = aliases.get(fieldName);
+        if (altKey != null) {
+            return extractJsonFieldByKey(block, altKey);
         }
         return null;
     }
 
-    private int extractIntField(String block, String fieldName, int defaultValue) {
-        Pattern p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*(\\d+)");
-        Matcher m = p.matcher(block);
-        if (m.find()) {
-            try {
-                return Integer.parseInt(m.group(1));
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
+    private String extractJsonFieldByKey(String block, String fieldName) {
+        String keyPattern = "\"" + fieldName + "\"";
+        int keyIdx = block.indexOf(keyPattern);
+        if (keyIdx == -1) return null;
+
+        int colonIdx = block.indexOf(':', keyIdx + keyPattern.length());
+        if (colonIdx == -1) return null;
+
+        int valStart = colonIdx + 1;
+        while (valStart < block.length() && java.lang.Character.isWhitespace(block.charAt(valStart))) {
+            valStart++;
         }
-        return defaultValue;
+        if (valStart >= block.length()) return null;
+
+        char firstChar = block.charAt(valStart);
+
+        if (firstChar == '"') {
+            StringBuilder sb = new StringBuilder();
+            boolean escaped = false;
+            for (int i = valStart + 1; i < block.length(); i++) {
+                char c = block.charAt(i);
+                if (escaped) {
+                    sb.append(c);
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    return sb.toString();
+                } else {
+                    sb.append(c);
+                }
+            }
+            return sb.toString();
+        }
+
+        // Unquoted value
+        StringBuilder sb = new StringBuilder();
+        for (int i = valStart; i < block.length(); i++) {
+            char c = block.charAt(i);
+            if (c == ',' || c == '}' || c == '\n' || c == '\r') break;
+            sb.append(c);
+        }
+        return sb.toString().trim();
+    }
+
+    private int extractIntField(String block, String fieldName, int defaultValue) {
+        String val = extractJsonField(block, fieldName);
+        if (val == null) return defaultValue;
+        try {
+            return Integer.parseInt(val);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     private List<Long> extractCharacterIds(String block, List<Character> knownCharacters) {

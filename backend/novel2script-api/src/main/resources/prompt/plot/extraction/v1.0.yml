@@ -62,14 +62,14 @@ system: |
 user_template: |
   以下是小说的章节内容以及已知角色信息。请提取所有关键情节事件。
 
-  {{#characters}}
+  {{#hasCharacters}}
   ## 已知角色
   | 角色名 | 类型 | 描述 |
   |--------|------|------|
   {{#characters}}
   | {{name}} | {{roleType}} | {{description}} |
   {{/characters}}
-  {{/characters}}
+  {{/hasCharacters}}
 
   ## 冲突类型参考
   {{conflict_types}}

@@ -5,7 +5,7 @@ import { SceneList } from './SceneList';
 import { SceneCard } from './SceneCard';
 import { CharacterPanel } from './CharacterPanel';
 import { PanelLeft, PanelRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface ScriptEditorProps {
   scriptId: number;
@@ -15,8 +15,19 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
   const { script, selectedSceneId } = useScriptStore();
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const sceneRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const selectedScene = script?.scenes.find((s) => s.id === selectedSceneId);
+
+  // Scroll to selected scene when it changes
+  useEffect(() => {
+    if (selectedSceneId) {
+      const el = sceneRefs.current.get(selectedSceneId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [selectedSceneId]);
 
   return (
     <div className="flex h-[calc(100vh-6rem)]">
@@ -54,7 +65,18 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
 
         <div className="max-w-3xl mx-auto py-8 px-6 space-y-6">
           {script?.scenes.map((scene) => (
-            <SceneCard key={scene.id} scene={scene} />
+            <div
+              key={scene.id}
+              ref={(el) => {
+                if (el) sceneRefs.current.set(scene.id, el);
+                else sceneRefs.current.delete(scene.id);
+              }}
+            >
+              <SceneCard
+                scene={scene}
+                selected={selectedSceneId === scene.id}
+              />
+            </div>
           ))}
           {(!script?.scenes || script.scenes.length === 0) && (
             <div className="text-center py-16">

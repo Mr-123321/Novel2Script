@@ -49,6 +49,12 @@ system: |
   - 允许潜台词、沉默和言外之意
   - 使用 parenthetical 标注特殊语气：(低声)、(冷笑)、(犹豫)、(激动)
 
+  ## ⚠️ 重要：空场景处理
+
+  - **如果场景中没有角色之间的直接对话（例如只有动作描述、环境描写、内心独白、或叙事性文字），必须返回空的 JSON 数组：`[]`**
+  - **绝对不要编造原文中没有的对话！**
+  - **如果只有一个人自言自语且原文没有写具体台词，也返回 `[]`**
+
 user_template: |
   请为以下场景生成角色对话。
 
@@ -65,12 +71,12 @@ user_template: |
   {{previousSceneSummary}}
   {{/hasPreviousScene}}
 
-  {{#sceneEvents}}
+  {{#hasSceneEvents}}
   ### 场景中的事件
   {{#sceneEvents}}
   - {{description}}（冲突类型: {{conflictType}}）
   {{/sceneEvents}}
-  {{/sceneEvents}}
+  {{/hasSceneEvents}}
 
   ## 角色设定
 
@@ -99,45 +105,43 @@ few_shot:
       【林川】大学生，好奇心强，性格勇敢、正直。说话风格: 直接而好奇，青年人的口语化表达
       【黑衣人】身份不明，冷静神秘。说话风格: 冷峻简洁，话少意重
     output: |
-      {
-        "dialogues": [
-          {
-            "speaker": "黑衣人",
-            "content": "你就是林川吧？",
-            "emotion": "平静",
-            "parenthetical": "从阴影中走出",
-            "replyTo": 0
-          },
-          {
-            "speaker": "林川",
-            "content": "你是谁？为什么知道我的名字？",
-            "emotion": "警觉",
-            "parenthetical": "后退半步，皱眉",
-            "replyTo": 1
-          },
-          {
-            "speaker": "黑衣人",
-            "content": "名字不重要。有人让我把这个交给你。",
-            "emotion": "冷淡",
-            "parenthetical": "从怀中取出信封",
-            "replyTo": 2
-          },
-          {
-            "speaker": "林川",
-            "content": "这是什么？",
-            "emotion": "疑惑",
-            "parenthetical": "没有伸手去接",
-            "replyTo": 3
-          },
-          {
-            "speaker": "黑衣人",
-            "content": "看了你就知道了。记住——不要告诉任何人。",
-            "emotion": "严肃",
-            "parenthetical": "将信塞入林川手中，转身离开",
-            "replyTo": 4
-          }
-        ]
-      }
+      [
+        {
+          "speaker": "黑衣人",
+          "content": "你就是林川吧？",
+          "emotion": "平静",
+          "parenthetical": "从阴影中走出",
+          "replyTo": 0
+        },
+        {
+          "speaker": "林川",
+          "content": "你是谁？为什么知道我的名字？",
+          "emotion": "警觉",
+          "parenthetical": "后退半步，皱眉",
+          "replyTo": 1
+        },
+        {
+          "speaker": "黑衣人",
+          "content": "名字不重要。有人让我把这个交给你。",
+          "emotion": "冷淡",
+          "parenthetical": "从怀中取出信封",
+          "replyTo": 2
+        },
+        {
+          "speaker": "林川",
+          "content": "这是什么？",
+          "emotion": "疑惑",
+          "parenthetical": "没有伸手去接",
+          "replyTo": 3
+        },
+        {
+          "speaker": "黑衣人",
+          "content": "看了你就知道了。记住——不要告诉任何人。",
+          "emotion": "严肃",
+          "parenthetical": "将信塞入林川手中，转身离开",
+          "replyTo": 4
+        }
+      ]
 
   - input: |
       场景: 好友决裂
@@ -148,45 +152,54 @@ few_shot:
       【李明】公司合伙人，被好友背叛。性格沉稳、理智。说话风格: 冷静克制，但此刻克制着巨大的愤怒
       【张伟】昔日的朋友，叛徒。性格精明、实际。说话风格: 冷峻简洁，辩解时闪烁其词
     output: |
-      {
-        "dialogues": [
-          {
-            "speaker": "李明",
-            "content": "三年了。就为了这个？",
-            "emotion": "压抑",
-            "parenthetical": "将文件缓缓放在桌上",
-            "replyTo": 0
-          },
-          {
-            "speaker": "张伟",
-            "content": "……你知道了。",
-            "emotion": "平静",
-            "parenthetical": "没有看文件，也没有看李明",
-            "replyTo": 1
-          },
-          {
-            "speaker": "李明",
-            "content": "我问你，三年——就为了这个？",
-            "emotion": "愤怒",
-            "parenthetical": "声音在发抖",
-            "replyTo": 2
-          },
-          {
-            "speaker": "张伟",
-            "content": "你不懂。在这个世界上，有些东西比情义重要。",
-            "emotion": "冷淡",
-            "parenthetical": "终于抬头，眼神冰冷",
-            "replyTo": 3
-          },
-          {
-            "speaker": "李明",
-            "content": "那你走吧。",
-            "emotion": "悲伤",
-            "parenthetical": "沉默片刻后，声音极低",
-            "replyTo": 4
-          }
-        ]
-      }
+      [
+        {
+          "speaker": "李明",
+          "content": "三年了。就为了这个？",
+          "emotion": "压抑",
+          "parenthetical": "将文件缓缓放在桌上",
+          "replyTo": 0
+        },
+        {
+          "speaker": "张伟",
+          "content": "……你知道了。",
+          "emotion": "平静",
+          "parenthetical": "没有看文件，也没有看李明",
+          "replyTo": 1
+        },
+        {
+          "speaker": "李明",
+          "content": "我问你，三年——就为了这个？",
+          "emotion": "愤怒",
+          "parenthetical": "声音在发抖",
+          "replyTo": 2
+        },
+        {
+          "speaker": "张伟",
+          "content": "你不懂。在这个世界上，有些东西比情义重要。",
+          "emotion": "冷淡",
+          "parenthetical": "终于抬头，眼神冰冷",
+          "replyTo": 3
+        },
+        {
+          "speaker": "李明",
+          "content": "那你走吧。",
+          "emotion": "悲伤",
+          "parenthetical": "沉默片刻后，声音极低",
+          "replyTo": 4
+        }
+      ]
+
+  - input: |
+      场景: 沉默的告别
+      地点: 火车站月台 (外景) / 时间: EVENING / 氛围: 伤感
+      概要: 两人相对而立，千言万语化作沉默。没有一句台词，只有眼神交汇和转身离开。
+
+      角色:
+      【阿诚】远行的年轻人，性格内敛、不善言辞
+      【小月】送行的姑娘，温柔而坚强
+    output: |
+      []
 
 output_schema:
   type: array

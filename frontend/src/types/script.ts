@@ -24,10 +24,11 @@ export interface Script {
   dialogueCount: number;
   yamlContent?: string;
   status: ScriptStatus;
-  progress: number;
+  progress: number; // 0.00 - 100.00
   scenes: Scene[];
   characters: Character[];
   plotEvents: PlotEvent[];
+  workflowState?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +44,9 @@ export interface Scene {
   summary?: string;
   mood?: string;
   sourceReason?: string;
+  sceneHeading?: string; // generated: "INT. 教室 - MORNING"
+  chapterIds?: number[];
+  characterIds?: number[];
   dialogues: Dialogue[];
   actions: Action[];
 }
@@ -83,17 +87,34 @@ export interface PlotEvent {
   importance: number;
 }
 
+/** Backend GenerationProgress DTO — SSE event payload */
 export interface WorkflowProgress {
-  scriptId: number;
+  executionId: string; // script ID as string
   currentStep: WorkflowStep;
-  progress: number;
+  overallProgress: number; // 0.00 - 100.00
+  status: string;
+  startedAt: string;
+  estimatedCompletion: string;
   message: string;
-  timestamp: string;
 }
 
+/** Backend ScriptGenerateRequest — focusCharacters is comma-separated string */
 export interface ScriptGenerateRequest {
   novelId: number;
   maxScenes: number;
   style?: string;
-  focusCharacters?: string[];
+  focusCharacters?: string; // comma-separated, e.g. "林川, 李雪"
+}
+
+/** Response from POST /api/v1/scripts/generate */
+export interface ScriptGenerateResponse {
+  executionId: string;
+  status: string;
+  message: string;
+}
+
+/** Response from GET /api/v1/scripts/{id}/workflow/mermaid */
+export interface WorkflowMermaidResponse {
+  scriptId: string;
+  mermaid: string;
 }
