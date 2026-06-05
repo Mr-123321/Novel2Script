@@ -1,8 +1,25 @@
 import type { Novel, NovelUploadResponse } from '@/types/novel';
-import type { Script, ScriptGenerateRequest, WorkflowProgress } from '@/types/script';
-import type { ApiError } from '@/types/api';
+import type {
+  Script,
+  ScriptGenerateRequest,
+  ScriptGenerateResponse,
+  WorkflowProgress,
+  WorkflowMermaidResponse,
+} from '@/types/script';
 
 const BASE_URL = '/api/v1';
+
+/** Normalize error from various response shapes into a string message */
+function normalizeError(err: unknown): string {
+  if (!err) return '未知错误';
+  if (typeof err === 'string') return err;
+  const detail = (err as { detail?: string }).detail;
+  if (detail) return detail;
+  const message = (err as { message?: string }).message;
+  if (message) return message;
+  if (err instanceof Error) return err.message;
+  return JSON.stringify(err);
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
@@ -11,16 +28,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    const error: ApiError = await res.json().catch(() => ({
+    const body = await res.json().catch(() => ({
       status: res.status,
-      title: 'Unknown Error',
-      detail: res.statusText,
+      title: 'Request Failed',
+      detail: `HTTP ${res.status}: ${res.statusText}`,
     }));
-    throw error;
+    throw { ...body, __isApiError: true };
   }
 
   return res.json();
 }
+
+// ==================== Novels ====================
 
 /** Upload a novel file */
 export async function uploadNovel(file: File): Promise<NovelUploadResponse> {
@@ -52,9 +71,13 @@ export function deleteNovel(id: number): Promise<void> {
   return request<void>(`/novels/${id}`, { method: 'DELETE' });
 }
 
-/** Start script generation */
-export function generateScript(data: ScriptGenerateRequest): Promise<Script> {
-  return request<Script>('/scripts/generate', {
+// ==================== Scripts ====================
+
+/** Start script generation — returns executionId (not full Script) */
+export function generateScript(
+  data: ScriptGenerateRequest
+): Promise<ScriptGenerateResponse> {
+  return request<ScriptGenerateResponse>('/scripts/generate', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -70,48 +93,108 @@ export function listScripts(): Promise<Script[]> {
   return request<Script[]>('/scripts');
 }
 
-/** Get script YAML content */
-export function getScriptYaml(id: number): Promise<string> {
-  return fetch(`${BASE_URL}/scripts/${id}/yaml`).then(res => res.text());
+// ==================== Exports (YAML) ====================
+
+/** Get script YAML content — backend at /api/v1/exports/{id}/yaml */
+export async function getScriptYaml(
+  id: number
+): Promise<{ yaml: string } | { yaml: null; message: string }> {
+  const res = await fetch(`${BASE_URL}/exports/${id}/yaml`);
+  if (!res.ok) {
+    return { yaml: null, message: 'YAML 内容尚未生成或剧本不存在' };
+  }
+  return res.json();
 }
 
+/** Download YAML file as blob */
+export async function downloadScriptYaml(id: number): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/exports/${id}/yaml/download`);
+  if (!res.ok) throw new Error('Download failed');
+  return res.blob();
+}
+
+// ==================== Workflow ====================
+
+/** Get Mermaid workflow diagram */
+export function getWorkflowMermaid(id: number): Promise<WorkflowMermaidResponse> {
+  return request<WorkflowMermaidResponse>(`/scripts/${id}/workflow/mermaid`);
+}
+
+// ==================== Updates ====================
+
 /** Update a scene */
-export function updateScene(scriptId: number, sceneId: number, data: Record<string, unknown>): Promise<void> {
-  return request<void>(`/scripts/${scriptId}/scenes/${sceneId}`, {
+export function updateScene(
+  scriptId: number,
+  sceneId: number,
+  data: Record<string, unknown>
+): Promise<{ scriptId: number; sceneId: number; updated: boolean; message: string }> {
+  return request(`/scripts/${scriptId}/scenes/${sceneId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
 /** Update a dialogue line */
-export function updateDialogue(scriptId: number, dialogueId: number, data: Record<string, unknown>): Promise<void> {
-  return request<void>(`/scripts/${scriptId}/dialogues/${dialogueId}`, {
+export function updateDialogue(
+  scriptId: number,
+  dialogueId: number,
+  data: Record<string, unknown>
+): Promise<{ scriptId: number; dialogueId: number; updated: boolean; message: string }> {
+  return request(`/scripts/${scriptId}/dialogues/${dialogueId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
 /** Update a character */
-export function updateCharacter(scriptId: number, characterId: number, data: Record<string, unknown>): Promise<void> {
-  return request<void>(`/scripts/${scriptId}/characters/${characterId}`, {
+export function updateCharacter(
+  scriptId: number,
+  characterId: number,
+  data: Record<string, unknown>
+): Promise<{ scriptId: number; characterId: number; updated: boolean; message: string }> {
+  return request(`/scripts/${scriptId}/characters/${characterId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-/** Create SSE connection for generation progress */
+// ==================== SSE ====================
+
+/**
+ * Create SSE connection for generation progress.
+ * Backend sends named events: "progress", "complete", "error"
+ * Progress payload: GenerationProgress { executionId, currentStep, overallProgress, ... }
+ */
 export function subscribeProgress(
   scriptId: number,
-  onMessage: (data: WorkflowProgress) => void,
+  onProgress: (data: WorkflowProgress) => void,
+  onComplete?: (data: { scriptId: number; status: string }) => void,
   onError?: (err: Event) => void
 ): EventSource {
-  const eventSource = new EventSource(`${BASE_URL}/scripts/${scriptId}/progress`);
-  eventSource.onmessage = (event) => {
+  const eventSource = new EventSource(
+    `${BASE_URL}/scripts/${scriptId}/progress`
+  );
+
+  eventSource.addEventListener('progress', (event: MessageEvent) => {
     const data: WorkflowProgress = JSON.parse(event.data);
-    onMessage(data);
+    onProgress(data);
+  });
+
+  eventSource.addEventListener('complete', (event: MessageEvent) => {
+    const data = JSON.parse(event.data);
+    eventSource.close();
+    onComplete?.(data);
+  });
+
+  eventSource.addEventListener('error', (event: Event) => {
+    eventSource.close();
+    onError?.(event);
+  });
+
+  // Fallback onerror for connection issues
+  eventSource.onerror = (event) => {
+    onError?.(event);
   };
-  if (onError) {
-    eventSource.onerror = onError;
-  }
+
   return eventSource;
 }

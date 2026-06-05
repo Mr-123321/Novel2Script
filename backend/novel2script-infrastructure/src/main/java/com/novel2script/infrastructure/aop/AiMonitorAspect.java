@@ -6,20 +6,27 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.springframework.ai.chat.metadata.ChatResponseMetadata;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 /**
  * AOP aspect that intercepts {@link AiMonitored} methods and writes
  * audit records to the {@code prompt_audits} table.
  *
- * <p>Records: model name, token usage, latency, success/failure, retry count.
+ * <p>Records: model name, latency, success/failure, prompt/response size estimation,
+ * and granular timing breakdown (method-level).
+ *
+ * <p><b>Note:</b> Token usage is estimated from character counts since
+ * {@link org.springframework.ai.chat.model.ChatResponse} is consumed internally
+ * by agent methods and not returned to this aspect. For accurate token counts,
+ * agents should call {@link com.novel2script.infrastructure.prompt.PromptAuditService}
+ * directly after receiving the ChatResponse.
  */
 @Slf4j
 @Aspect
@@ -45,34 +52,44 @@ public class AiMonitorAspect {
         String promptName = aiMonitored.value();
         String promptVersion = aiMonitored.version();
         String modelName = "unknown";
+        String methodName = joinPoint.getSignature().toShortString();
 
         Instant start = Instant.now();
-        int retryCount = 0;
         boolean success = true;
         String errorMessage = null;
-        int inputTokens = 0;
-        int outputTokens = 0;
+        int estimatedInputChars = 0;
+        int estimatedOutputChars = 0;
+
+        // ── Estimate input prompt size from method arguments ──
+        estimatedInputChars = estimateInputSize(joinPoint);
+
+        log.info("⏱️  AI call START [{}] {} — prompt est. {} chars",
+                promptName, methodName, estimatedInputChars);
 
         try {
             Object result = joinPoint.proceed();
 
-            // ── Extract token usage from ChatResponse ──────
-            modelName = extractModelName(joinPoint, result);
-            if (result instanceof ChatResponse chatResponse) {
-                ChatResponseMetadata metadata = chatResponse.getMetadata();
-                if (metadata != null && metadata.getUsage() != null) {
-                    inputTokens = (int) metadata.getUsage().getPromptTokens();
-                    outputTokens = (int) metadata.getUsage().getCompletionTokens();
-                }
-            }
+            // Estimate output size from result
+            estimatedOutputChars = estimateOutputSize(result);
+
+            long latencyMs = Duration.between(start, Instant.now()).toMillis();
+
+            // Log granular timing
+            log.info("⏱️  AI call END   [{}] {} — latency {}ms | prompt~{} chars → response~{} chars | ✅ SUCCESS",
+                    promptName, methodName, latencyMs, estimatedInputChars, estimatedOutputChars);
 
             return result;
         } catch (Exception e) {
             success = false;
+            long latencyMs = Duration.between(start, Instant.now()).toMillis();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
             if (errorMessage.length() > 500) {
                 errorMessage = errorMessage.substring(0, 500);
             }
+
+            log.error("⏱️  AI call FAIL [{}] {} — latency {}ms | prompt~{} chars | ❌ {}",
+                    promptName, methodName, latencyMs, estimatedInputChars, errorMessage);
+
             throw e; // re-throw — let retry / global handler deal with it
         } finally {
             long latencyMs = Duration.between(start, Instant.now()).toMillis();
@@ -80,47 +97,77 @@ public class AiMonitorAspect {
             try {
                 jdbcTemplate.update(INSERT_SQL,
                         promptName, promptVersion, modelName,
-                        inputTokens, outputTokens, latencyMs,
-                        retryCount, success ? 1 : 0, errorMessage);
+                        estimatedInputChars, estimatedOutputChars, latencyMs,
+                        0, success ? 1 : 0, errorMessage);
             } catch (Exception dbEx) {
                 // Audit failure must not break business flow
                 log.warn("Failed to write AI audit record for '{}': {}", promptName, dbEx.getMessage());
             }
-
-            log.debug("AI call [{}] model={} latency={}ms tokens={}/{} success={}",
-                    promptName, modelName, latencyMs, inputTokens, outputTokens, success);
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────
+    // ── Size estimation helpers ────────────────────────────
 
     /**
-     * Try to determine the model name from method arguments or the ChatResponse result.
+     * Estimate the input prompt size by examining method arguments.
+     * Looks for common types: String (prompt text), List (chapters/characters),
+     * Map (template variables), Scene (scene data).
      */
-    private String extractModelName(ProceedingJoinPoint joinPoint, Object result) {
-        // First try to find a ChatModel in the method args and read its toString()
-        Method method = ((MethodSignature) joinPoint.getSignature()).getMethod();
-        Class<?>[] paramTypes = method.getParameterTypes();
-        Object[] args = joinPoint.getArgs();
-        for (int i = 0; i < paramTypes.length; i++) {
-            if (args[i] != null && paramTypes[i].getName().contains("ChatModel")) {
-                String s = args[i].toString();
-                // Extract model name from toString (format varies by implementation)
-                if (s.contains("model=")) {
-                    return s.replaceAll(".*model=([^,\\)]+).*", "$1").trim();
+    private int estimateInputSize(ProceedingJoinPoint joinPoint) {
+        int total = 0;
+        for (Object arg : joinPoint.getArgs()) {
+            if (arg == null) continue;
+            if (arg instanceof String s) {
+                total += s.length();
+            } else if (arg instanceof List<?> list) {
+                for (Object item : list) {
+                    total += estimateObjectSize(item);
                 }
-                return paramTypes[i].getSimpleName();
+            } else if (arg instanceof Map<?, ?> map) {
+                for (Object val : map.values()) {
+                    if (val instanceof String s) total += s.length();
+                    else if (val instanceof List<?> l) total += l.size() * 200;
+                }
+            } else {
+                total += estimateObjectSize(arg);
             }
         }
+        return total;
+    }
 
-        // Fallback: try to get from ChatResponse metadata
-        if (result instanceof ChatResponse chatResponse) {
-            ChatResponseMetadata metadata = chatResponse.getMetadata();
-            if (metadata != null && metadata.getModel() != null) {
-                return metadata.getModel();
+    /**
+     * Estimate the output size from the method return value.
+     */
+    private int estimateOutputSize(Object result) {
+        if (result == null) return 0;
+        if (result instanceof String s) return s.length();
+        if (result instanceof List<?> list) {
+            int total = 0;
+            for (Object item : list) {
+                total += estimateObjectSize(item);
             }
+            return total;
         }
+        if (result instanceof Map<?, ?> map) return map.size() * 500;
+        // For domain objects, use toString length as rough estimate
+        String str = result.toString();
+        return Math.min(str.length(), 50000); // cap at 50K
+    }
 
-        return "unknown";
+    private int estimateObjectSize(Object obj) {
+        if (obj == null) return 0;
+        if (obj instanceof String s) return s.length();
+        // Try common methods for getting content
+        try {
+            Method m = obj.getClass().getMethod("getContent");
+            Object content = m.invoke(obj);
+            if (content instanceof String s) return s.length();
+        } catch (Exception ignored) {}
+        try {
+            Method m = obj.getClass().getMethod("getSummary");
+            Object summary = m.invoke(obj);
+            if (summary instanceof String s) return s.length();
+        } catch (Exception ignored) {}
+        return 200; // rough estimate for unknown objects
     }
 }

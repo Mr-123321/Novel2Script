@@ -16,11 +16,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * REST controller for script generation and management.
@@ -88,24 +90,52 @@ public class ScriptController {
     @Operation(summary = "SSE 实时推送剧本生成进度")
     public SseEmitter streamProgress(@PathVariable Long id) {
         SseEmitter emitter = new SseEmitter(600_000L); // 10 min timeout
+        AtomicBoolean completed = new AtomicBoolean(false);
 
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-        emitter.onCompletion(scheduler::shutdownNow);
-        emitter.onTimeout(scheduler::shutdownNow);
+        // Graceful cleanup on any terminal event
+        Runnable cleanup = () -> {
+            if (completed.compareAndSet(false, true)) {
+                scheduler.shutdownNow();
+            }
+        };
+
+        emitter.onCompletion(cleanup);
+        emitter.onTimeout(() -> {
+            log.info("SSE timeout for script id={}", id);
+            cleanup.run();
+        });
         emitter.onError(e -> {
-            log.warn("SSE error for script id={}: {}", id, e.getMessage());
-            scheduler.shutdownNow();
+            log.warn("SSE callback error for script id={}: {}", id,
+                    e != null ? e.getMessage() : "null");
+            cleanup.run();
         });
 
         scheduler.scheduleAtFixedRate(() -> {
+            // Don't push if emitter is already closed
+            if (completed.get()) return;
+
             try {
                 double progress = scriptService.getProgress(id);
-                Optional<Script> scriptOpt = scriptService.findById(id);
+                Optional<Script> scriptOpt = scriptService.findByIdQuietly(id);
+
+                // Derive current step from workflow state (or fallback to CHAPTER_PARSE)
+                WorkflowStep currentStep = WorkflowStep.CHAPTER_PARSE;
+                if (scriptOpt.isPresent()) {
+                    Map<String, Object> ws = scriptOpt.get().getWorkflowState();
+                    if (ws != null && ws.get("currentStep") instanceof String stepName) {
+                        try {
+                            currentStep = WorkflowStep.valueOf(stepName);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep default
+                        }
+                    }
+                }
 
                 GenerationProgress gp = new GenerationProgress(
                         String.valueOf(id),
-                        WorkflowStep.CHAPTER_PARSE, // placeholder — would come from workflow state
+                        currentStep,
                         progress,
                         scriptOpt.map(s -> s.getStatus() != null ? s.getStatus().name() : "UNKNOWN")
                                 .orElse("UNKNOWN"),
@@ -119,22 +149,45 @@ public class ScriptController {
                         .name("progress")
                         .data(gp));
 
+                // Check for FAILED status — send error event and stop
+                if (scriptOpt.isPresent() && scriptOpt.get().getStatus() != null
+                        && scriptOpt.get().getStatus().name().equals("FAILED")) {
+                    String errorMsg = "剧本生成失败，请重试";
+                    Map<String, Object> ws = scriptOpt.get().getWorkflowState();
+                    if (ws != null && ws.get("error") instanceof String err) {
+                        errorMsg = err;
+                    }
+                    emitter.send(SseEmitter.event()
+                            .name("error")
+                            .data(Map.of("scriptId", id, "status", "FAILED",
+                                    "message", errorMsg)));
+                    emitter.complete();
+                    cleanup.run();
+                    return;
+                }
+
                 if (progress >= 100.0) {
                     emitter.send(SseEmitter.event()
                             .name("complete")
                             .data(Map.of("scriptId", id, "status", "COMPLETED")));
                     emitter.complete();
+                    cleanup.run();
                 }
+            } catch (IOException e) {
+                // Client disconnected — this is normal, not an error
+                log.info("SSE client disconnected for script id={}", id);
+                cleanup.run();
             } catch (Exception e) {
-                log.error("Failed to send SSE for script id={}: {}", id, e.getMessage());
+                // Other unexpected error — log and stop
+                log.warn("SSE send error for script id={}: {}", id, e.getMessage());
+                cleanup.run();
+                // DO NOT call completeWithError — it triggers global exception handler
+                // which tries to write JSON ProblemDetail into a dead SSE stream
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("error")
-                            .data(Map.of("message", e.getMessage())));
+                    emitter.complete();
                 } catch (Exception ignored) {
-                    // ignore send errors during error handling
+                    // emitter may already be closed
                 }
-                emitter.completeWithError(e);
             }
         }, 0, 2, TimeUnit.SECONDS);
 

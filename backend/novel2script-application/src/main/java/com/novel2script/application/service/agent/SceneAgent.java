@@ -112,10 +112,15 @@ public class SceneAgent {
         // Try registered prompt template first
         PromptTemplate template = promptRegistry.getLatest("scene-segmentation");
         if (template != null) {
+            List<Map<String, Object>> chapterList = buildChapterList(chapters);
+            List<Map<String, String>> characterList = buildCharacterList(characters);
+            List<Map<String, Object>> eventList = buildEventList(plotEvents);
             Map<String, Object> vars = new HashMap<>();
-            vars.put("chapters", buildChapterList(chapters));
-            vars.put("events", buildEventList(plotEvents));
-            vars.put("characters", buildCharacterList(characters));
+            vars.put("chapters", chapterList);
+            vars.put("characters", characterList);
+            vars.put("hasCharacters", characterList != null && !characterList.isEmpty());
+            vars.put("events", eventList);
+            vars.put("hasEvents", eventList != null && !eventList.isEmpty());
             return template.renderUserTemplate(vars);
         }
         return buildInlinePrompt(chapters, plotEvents, characters);
@@ -169,26 +174,41 @@ public class SceneAgent {
         sb.append("""
                 你是一位专业的影视编剧专家。请将以下小说内容切分为影视场景。
 
+                ## 核心原则
+
+                一个"场景"是影视剧本的基本单位，必须具备：
+                - **统一的地点**：同一个场景内地点不变
+                - **连续的时间**：同一个场景内时间是连续的
+                - **存在对白或动作**：至少有角色在做某事或说话
+
                 ## 切分规则（以下任一条件变化即切分新场景）
 
-                1. **地点变化**: 从一处到另一处（如"教室"→"操场"）
-                2. **时间变化**: 明显的时间跳跃（如"三天后"、"第二天早上"、"深夜"）
-                3. **人物变化**: 主要角色进出（超过50%角色变化）
-                4. **冲突变化**: 冲突升级或转换（如对话变争吵）
+                1. **地点变化**: 角色从一处移动到另一处（如"走出教室来到操场"→切分）
+                2. **时间跳跃**: 明确的时间推进（如"第二天"、"三天后"、"深夜"、"转眼间"）
+                3. **人物进出**: 重要角色登场或退场，导致场景焦点转移
+                4. **冲突转变**: 对话氛围明显变化（如平静交谈→激烈争吵）
                 5. **章节边界**: 自然章节结束
 
                 ## 每个场景必须包含
 
-                - sceneNumber: 场景序号
-                - title: 场景标题（简洁，8字以内）
-                - location: 发生地点
-                - timeOfDay: 时间（DAWN/MORNING/AFTERNOON/EVENING/NIGHT/LATE_NIGHT/UNKNOWN）
-                - interior: 是否室内（true=INT/false=EXT）
-                - summary: 场景摘要（30-80字）
-                - mood: 氛围（如"紧张"、"温馨"、"悲伤"）
-                - characterNames: 出场角色名列表
+                - sceneNumber: 场景序号（从1开始递增）
+                - title: 场景标题（简洁有力，8字以内，概括核心事件）
+                - location: 具体地点（如"教室"、"街道"、"卧室"，不要泛泛写"某处"）
+                - timeOfDay: 时间段（DAWN/MORNING/AFTERNOON/EVENING/NIGHT/LATE_NIGHT/UNKNOWN）
+                - interior: 室内外（true=室内INT/false=室外EXT）
+                - summary: 场景摘要（30-80字，描述这个场景里发生了什么，不要重复整段原文）
+                - mood: 场景氛围（如"紧张"、"温馨"、"悲伤"、"悬疑"、"凝重"）
+                - characterNames: 出场角色名列表（只列出实际在此场景中说话或行动的角色）
                 - sourceReason: 切分原因（LOCATION/TIME/CHARACTER/CONFLICT/CHAPTER_BOUNDARY）
                 - chapterIds: 来源章节编号列表
+
+                ## 重要提示
+
+                - 场景数量不要太多，一般每章2-5个场景即可
+                - 不要把每一段对话都切成一个场景——合并同一地点同一时间的连续内容
+                - summary 要概括场景的核心事件，不要大段抄原文
+                - characterNames 必须使用以上"已知角色"列表中的准确名字
+                - 确保 location 是具体地点名词，不是抽象描述
 
                 """);
 
@@ -196,9 +216,10 @@ public class SceneAgent {
         if (characters != null && !characters.isEmpty()) {
             sb.append("## 已知角色\n\n");
             for (Character c : characters) {
-                sb.append(String.format("- %s (%s)\n",
+                sb.append(String.format("- %s (%s): %s\n",
                         c.getCanonicalName(),
-                        c.getRoleType() != null ? c.getRoleType().name() : "未知"));
+                        c.getRoleType() != null ? c.getRoleType().name() : "未知",
+                        c.getDescription() != null ? c.getDescription() : ""));
             }
             sb.append("\n");
         }
@@ -250,11 +271,15 @@ public class SceneAgent {
             return scenes;
         }
 
-        Pattern scenePattern = Pattern.compile("\\{[^}]+}");
-        Matcher sceneMatcher = scenePattern.matcher(jsonArray);
+        // Use string-aware bracket parsing (handles nested objects/arrays)
+        List<String> blocks = extractJsonObjects(jsonArray);
+        if (blocks.isEmpty()) {
+            log.warn("SceneAgent: no JSON objects found in array (first 200 chars): {}",
+                    jsonArray.length() > 200 ? jsonArray.substring(0, 200) + "..." : jsonArray);
+            return scenes;
+        }
 
-        while (sceneMatcher.find()) {
-            String block = sceneMatcher.group();
+        for (String block : blocks) {
             try {
                 Scene scene = parseSceneBlock(block);
                 if (scene != null) {
@@ -265,17 +290,92 @@ public class SceneAgent {
             }
         }
 
+        if (scenes.isEmpty() && !blocks.isEmpty()) {
+            log.warn("SceneAgent: parsed 0 scenes from {} JSON blocks — first block: {}",
+                    blocks.size(),
+                    blocks.get(0).length() > 200 ? blocks.get(0).substring(0, 200) + "..." : blocks.get(0));
+        }
+
         scenes.sort(Comparator.comparingInt(Scene::getSceneNumber));
         return scenes;
     }
 
-    private String extractJsonArray(String text) {
-        Pattern pattern = Pattern.compile("\\[\\s*\\{.*?}\\s*]", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group();
+    /**
+     * Extract individual JSON objects from a JSON array string.
+     * Uses string-aware bracket-depth tracking to handle nested braces.
+     */
+    private List<String> extractJsonObjects(String jsonArray) {
+        List<String> objects = new ArrayList<>();
+        int i = 0;
+        while (i < jsonArray.length()) {
+            if (jsonArray.charAt(i) == '{') {
+                int depth = 0;
+                boolean inString = false;
+                boolean escaped = false;
+                int start = i;
+                while (i < jsonArray.length()) {
+                    char c = jsonArray.charAt(i);
+                    if (inString) {
+                        if (escaped) escaped = false;
+                        else if (c == '\\') escaped = true;
+                        else if (c == '"') inString = false;
+                    } else {
+                        if (c == '"') inString = true;
+                        else if (c == '{') depth++;
+                        else if (c == '}') {
+                            depth--;
+                            if (depth == 0) {
+                                objects.add(jsonArray.substring(start, i + 1));
+                                i++;
+                                break;
+                            }
+                        }
+                    }
+                    i++;
+                }
+            } else {
+                i++;
+            }
         }
-        return null;
+        return objects;
+    }
+
+    private String extractJsonArray(String text) {
+        // Strip markdown code fences first
+        String cleaned = text
+                .replaceAll("```json\\s*", "")
+                .replaceAll("```\\s*", "")
+                .trim();
+
+        // Try to find the outermost JSON array
+        int start = cleaned.indexOf('[');
+        if (start == -1) {
+            log.warn("SceneAgent: no '[' found in AI response (first 200 chars): {}",
+                    text.length() > 200 ? text.substring(0, 200) + "..." : text);
+            return null;
+        }
+
+        // Find matching closing bracket
+        int depth = 0;
+        int end = -1;
+        for (int i = start; i < cleaned.length(); i++) {
+            char ch = cleaned.charAt(i);
+            if (ch == '[') depth++;
+            else if (ch == ']') {
+                depth--;
+                if (depth == 0) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+
+        if (end == -1) {
+            log.warn("SceneAgent: no matching ']' found for array starting at {}", start);
+            return null;
+        }
+
+        return cleaned.substring(start, end + 1);
     }
 
     private Scene parseSceneBlock(String block) {
@@ -626,11 +726,62 @@ public class SceneAgent {
     // ── JSON Parsing Helpers ────────────────────────────
 
     private String extractJsonField(String block, String fieldName) {
+        // First try with regex for quoted strings
         Pattern p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
         Matcher m = p.matcher(block);
         if (m.find()) {
             return m.group(1).trim();
         }
+
+        // Fallback 1: string-aware extraction for escaped quotes
+        String keyPattern = "\"" + fieldName + "\"";
+        int keyIdx = block.indexOf(keyPattern);
+        if (keyIdx != -1) {
+            int colonIdx = block.indexOf(':', keyIdx + keyPattern.length());
+            if (colonIdx != -1) {
+                int valStart = colonIdx + 1;
+                while (valStart < block.length() && java.lang.Character.isWhitespace(block.charAt(valStart))) {
+                    valStart++;
+                }
+                if (valStart < block.length()) {
+                    char firstChar = block.charAt(valStart);
+                    if (firstChar == '"') {
+                        // String-aware quoted value extraction
+                        StringBuilder sb = new StringBuilder();
+                        boolean escaped = false;
+                        for (int i = valStart + 1; i < block.length(); i++) {
+                            char c = block.charAt(i);
+                            if (escaped) {
+                                sb.append(c);
+                                escaped = false;
+                            } else if (c == '\\') {
+                                escaped = true;
+                            } else if (c == '"') {
+                                return sb.toString();
+                            } else {
+                                sb.append(c);
+                            }
+                        }
+                        return sb.toString();
+                    } else if (firstChar != '{' && firstChar != '[') {
+                        // Unquoted value
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = valStart; i < block.length(); i++) {
+                            char c = block.charAt(i);
+                            if (c == ',' || c == '}' || c == '\n' || c == '\r') break;
+                            sb.append(c);
+                        }
+                        String result = sb.toString().trim();
+                        if (result.startsWith("\"") && result.endsWith("\"")) {
+                            result = result.substring(1, result.length() - 1);
+                        }
+                        return result;
+                    }
+                }
+            }
+        }
+
+        // Fallback 2: try with flexible pattern
         p = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*([^,\\n}]+)");
         m = p.matcher(block);
         if (m.find()) {

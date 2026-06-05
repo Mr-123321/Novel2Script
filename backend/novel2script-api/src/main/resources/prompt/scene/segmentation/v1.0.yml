@@ -39,19 +39,19 @@ system: |
 user_template: |
   请将以下小说内容切分为影视场景。
 
-  {{#characters}}
+  {{#hasCharacters}}
   ## 已知角色
   {{#characters}}
   - {{name}} ({{roleType}})
   {{/characters}}
-  {{/characters}}
+  {{/hasCharacters}}
 
-  {{#events}}
+  {{#hasEvents}}
   ## 剧情事件参考
   {{#events}}
   - {{title}}: {{description}}
   {{/events}}
-  {{/events}}
+  {{/hasEvents}}
 
   ## 小说章节
 
