@@ -1,7 +1,7 @@
 # Dialogue Generation v1.0
 name: dialogue-generation
 version: "1.0"
-description: "为剧本场景生成自然对话"
+description: "为影视场景生成符合角色性格的自然对白——Novel2Script 核心模块"
 
 model:
   recommended: claude-sonnet-4-6
@@ -9,67 +9,213 @@ model:
   max_tokens: 4096
 
 system: |
-  你是一位专业的影视对白编剧。
-  请为给定的场景生成自然、流畅的角色对话。
+  你是一位资深的影视编剧和对话系统专家。
 
-  对白要求：
-  - 符合角色性格和身份
-  - 推动剧情发展
-  - 包含潜台词和情感层次
-  - 避免过于书面化的表达
+  ## 核心创作原则
+
+  1. **SHOW, DON'T TELL**
+     通过对话和潜台词展现冲突、情感和信息，永远不要直接说明。
+     错误: "我很生气因为你背叛了我"
+     正确: (沉默片刻) "...三年了。就为了这个？"
+
+  2. **VOICE MATTERS**
+     每个角色有独特的说话方式，取决于其：
+     - 性格特征（冷静→简洁/热情→奔放/冷酷→凌厉）
+     - 社会身份（学生→口语化/官员→正式/商人→算计）
+     - 当前情绪（愤怒→短句/悲伤→断续/兴奋→连贯）
+
+  3. **SUBTEXT（潜台词）**
+     最好的对白往往在说"别的"。人物很少直接表达真实想法。
+     - 表面说: "我没事"
+     - 潜台词: "我有事，但不想说"
+     - 通过动作和语境体现真实情感
+
+  4. **RHYTHM（节奏）**
+     - 冲突场景: 短句交错，快速切换
+     - 情感场景: 先长后短，层层递进
+     - 日常场景: 自然节奏，轻松变化
+     - 高潮场景: 一句比一句短，最后以动作收尾
+
+  5. **NO EXPOSITION DUMP**
+     不要通过角色对话来向观众解释背景信息。
+     错误: "我们认识已经十年了，从大学开始就是好朋友"
+     正确: 通过行为、暗示和情境自然展现关系
+
+  ## 对白规范
+
+  - 每句不超过 50 字（中文口语自然长度）
+  - 符合角色的社会身份和时代背景
+  - 对白之间要有逻辑衔接（问答/反驳/转移话题）
+  - 允许潜台词、沉默和言外之意
+  - 使用 parenthetical 标注特殊语气：(低声)、(冷笑)、(犹豫)、(激动)
 
 user_template: |
-  场景信息：
-  - 标题: {{sceneTitle}}
-  - 地点: {{location}}
-  - 时间: {{time}}
-  - 角色: {{characters}}
-  - 场景概要: {{summary}}
+  请为以下场景生成角色对话。
 
-  角色信息：
+  ## 场景信息
+
+  - **场景**: {{sceneTitle}}
+  - **地点**: {{location}} ({{isInterior}}景)
+  - **时间**: {{timeOfDay}}
+  - **氛围**: {{mood}}
+  - **概要**: {{summary}}
+
+  {{#hasPreviousScene}}
+  ### 前一个场景
+  {{previousSceneSummary}}
+  {{/hasPreviousScene}}
+
+  {{#sceneEvents}}
+  ### 场景中的事件
+  {{#sceneEvents}}
+  - {{description}}（冲突类型: {{conflictType}}）
+  {{/sceneEvents}}
+  {{/sceneEvents}}
+
+  ## 角色设定
+
   {{#characterProfiles}}
-  - {{name}}: {{description}} (性格: {{personality}})
+  ### 【{{name}}】
+  - 身份: {{description}}
+  - 性别: {{gender}}
+  - 性格: {{personality}}
+  - 类型: {{roleType}}
+  - **说话风格**: {{speechStyle}}
+  - 当前情绪: {{currentEmotion}}
+  - 关系: {{relationships}}
   {{/characterProfiles}}
 
-  {{#style}}
-  风格要求: {{style}}
-  {{/style}}
+  ## 输出要求
+
+  请以 JSON 数组格式输出所有角色的对白，按对话顺序排列。
 
 few_shot:
   - input: |
       场景: 街头遭遇
-      角色: 林川 (大学生，好奇心强), 黑衣人 (神秘，冷静)
-      概要: 林川被黑衣人拦住递信
+      地点: 街道 (外景) / 时间: AFTERNOON / 氛围: 紧张
+      概要: 林川在回家路上被神秘黑衣人拦住，递给他一封神秘信件
+
+      角色:
+      【林川】大学生，好奇心强，性格勇敢、正直。说话风格: 直接而好奇，青年人的口语化表达
+      【黑衣人】身份不明，冷静神秘。说话风格: 冷峻简洁，话少意重
     output: |
       {
         "dialogues": [
-          {"speaker": "黑衣人", "content": "你就是林川吧？有人让我把这个交给你。", "emotion": "平静", "stage_direction": "从怀中取出信封"},
-          {"speaker": "林川", "content": "你是谁？这是什么？", "emotion": "警觉", "stage_direction": "后退半步，皱眉"},
-          {"speaker": "黑衣人", "content": "看了你就知道了。记住，不要告诉任何人。", "emotion": "严肃", "stage_direction": "将信塞入林川手中，转身离开"}
+          {
+            "speaker": "黑衣人",
+            "content": "你就是林川吧？",
+            "emotion": "平静",
+            "parenthetical": "从阴影中走出",
+            "replyTo": 0
+          },
+          {
+            "speaker": "林川",
+            "content": "你是谁？为什么知道我的名字？",
+            "emotion": "警觉",
+            "parenthetical": "后退半步，皱眉",
+            "replyTo": 1
+          },
+          {
+            "speaker": "黑衣人",
+            "content": "名字不重要。有人让我把这个交给你。",
+            "emotion": "冷淡",
+            "parenthetical": "从怀中取出信封",
+            "replyTo": 2
+          },
+          {
+            "speaker": "林川",
+            "content": "这是什么？",
+            "emotion": "疑惑",
+            "parenthetical": "没有伸手去接",
+            "replyTo": 3
+          },
+          {
+            "speaker": "黑衣人",
+            "content": "看了你就知道了。记住——不要告诉任何人。",
+            "emotion": "严肃",
+            "parenthetical": "将信塞入林川手中，转身离开",
+            "replyTo": 4
+          }
+        ]
+      }
+
+  - input: |
+      场景: 好友决裂
+      地点: 房间 (内景) / 时间: NIGHT / 氛围: 凝重
+      概要: 李明当面质问好友张伟为什么出卖自己，十年友情在对话中碎裂
+
+      角色:
+      【李明】公司合伙人，被好友背叛。性格沉稳、理智。说话风格: 冷静克制，但此刻克制着巨大的愤怒
+      【张伟】昔日的朋友，叛徒。性格精明、实际。说话风格: 冷峻简洁，辩解时闪烁其词
+    output: |
+      {
+        "dialogues": [
+          {
+            "speaker": "李明",
+            "content": "三年了。就为了这个？",
+            "emotion": "压抑",
+            "parenthetical": "将文件缓缓放在桌上",
+            "replyTo": 0
+          },
+          {
+            "speaker": "张伟",
+            "content": "……你知道了。",
+            "emotion": "平静",
+            "parenthetical": "没有看文件，也没有看李明",
+            "replyTo": 1
+          },
+          {
+            "speaker": "李明",
+            "content": "我问你，三年——就为了这个？",
+            "emotion": "愤怒",
+            "parenthetical": "声音在发抖",
+            "replyTo": 2
+          },
+          {
+            "speaker": "张伟",
+            "content": "你不懂。在这个世界上，有些东西比情义重要。",
+            "emotion": "冷淡",
+            "parenthetical": "终于抬头，眼神冰冷",
+            "replyTo": 3
+          },
+          {
+            "speaker": "李明",
+            "content": "那你走吧。",
+            "emotion": "悲伤",
+            "parenthetical": "沉默片刻后，声音极低",
+            "replyTo": 4
+          }
         ]
       }
 
 output_schema:
-  type: object
-  properties:
-    dialogues:
-      type: array
-      items:
-        type: object
-        properties:
-          speaker: { type: string }
-          content: { type: string }
-          emotion: { type: string }
-          stage_direction: { type: string }
-        required: [speaker, content]
+  type: array
+  items:
+    type: object
+    properties:
+      speaker:
+        type: string
+        description: "说话人姓名"
+      content:
+        type: string
+        description: "对白内容，不超过50字"
+      emotion:
+        type: string
+        description: "情绪标签（愤怒/高兴/悲伤/平静/恐惧/惊讶/冷淡/兴奋/焦虑/绝望/中性等）"
+      parenthetical:
+        type: string
+        description: "括号说明，如'(低声)'、'(冷笑)'、'(犹豫)'，无则填null"
+      replyTo:
+        type: integer
+        description: "回复的对白序号，从0开始"
 
 validation:
   rules:
-    - field: dialogues[].speaker
+    - field: "[].speaker"
       rule: notBlank
-    - field: dialogues[].content
+    - field: "[].content"
       rule: notBlank
-    - field: dialogues[].content
+    - field: "[].content"
       rule: minLength
       param: "2"
   retry:
