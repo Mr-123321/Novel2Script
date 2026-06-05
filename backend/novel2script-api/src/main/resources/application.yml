@@ -24,6 +24,7 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
     locations: classpath:db/migration
+    validate-on-migrate: false
   ai:
     # 默认使用的 AI 提供商（必须在 providers 中配置）
     default-provider: deepseek
