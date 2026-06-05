@@ -33,11 +33,6 @@ public final class Constants {
     /** Default top-K for vector search */
     public static final int DEFAULT_TOP_K = 10;
 
-    /** Milvus collection names */
-    public static final String COLLECTION_CHARACTERS = "character_embeddings";
-    public static final String COLLECTION_CHAPTERS = "chapter_embeddings";
-    public static final String COLLECTION_SCENES = "scene_embeddings";
-
     /** Default page size */
     public static final int DEFAULT_PAGE_SIZE = 20;
 

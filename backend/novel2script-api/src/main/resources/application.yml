@@ -27,13 +27,6 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
-milvus:
-  host: ${MILVUS_HOST:localhost}
-  port: ${MILVUS_PORT:19530}
-  database: novel2script
-  connect-timeout-ms: 10000
-  index-type: IVF_FLAT
-
 server:
   port: 8080
 

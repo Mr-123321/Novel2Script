@@ -65,12 +65,6 @@
             <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- Milvus SDK -->
-        <dependency>
-            <groupId>io.milvus</groupId>
-            <artifactId>milvus-sdk-java</artifactId>
-        </dependency>
-
         <!-- SnakeYAML -->
         <dependency>
             <groupId>org.yaml</groupId>

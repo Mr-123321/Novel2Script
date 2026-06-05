@@ -35,8 +35,6 @@
         <flyway.version>10.17.0</flyway.version>
         <redisson.version>3.36.0</redisson.version>
 
-        <!-- Vector -->
-        <milvus-sdk.version>2.5.0</milvus-sdk.version>
 
         <!-- Utilities -->
         <snakeyaml.version>2.3</snakeyaml.version>
@@ -101,12 +99,6 @@
                 <version>${redisson.version}</version>
             </dependency>
 
-            <!-- Milvus SDK -->
-            <dependency>
-                <groupId>io.milvus</groupId>
-                <artifactId>milvus-sdk-java</artifactId>
-                <version>${milvus-sdk.version}</version>
-            </dependency>
 
             <!-- SnakeYAML -->
             <dependency>
