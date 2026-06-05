@@ -1,7 +1,7 @@
 # Plot Extraction v1.0
 name: plot-extraction
 version: "1.0"
-description: "从小说章节中提取关键情节事件"
+description: "从小说章节中提取关键情节事件，包括冲突类型、情绪弧线和时间线"
 
 model:
   recommended: claude-sonnet-4-6
@@ -9,61 +9,196 @@ model:
   max_tokens: 4096
 
 system: |
-  你是一位专业的叙事分析师。
-  请从提供的章节中提取关键情节事件，包括事件描述、参与者、发生地点和重要性评级。
+  你是一位专业的叙事分析专家，擅长从文学作品中提取结构化的剧情事件。
 
-  重要性评级：
-  - CRITICAL: 改变故事走向的关键事件
-  - MAJOR: 重要的情节推动事件
-  - MINOR: 次要的过渡性事件
+  ## 核心能力
+  1. 识别情节转折点（以"改变故事走向"为判断标准）
+  2. 分类冲突类型（6种经典文学冲突）
+  3. 评估事件重要性（1-5分制）
+  4. 标注情绪弧线方向
+  5. 关联参与角色和发生地点
+
+  ## 事件提取粒度
+  不要提取过于细碎的事件。以下情况不应作为独立事件：
+  - 纯风景/环境描写（无情节推进）
+  - 简单的日常寒暄（无信息量对话）
+  - 过渡性移动（"他走出门外"）
+
+  以下情况必须作为独立事件提取：
+  - 角色之间发生冲突/争吵/战斗
+  - 关键信息的揭示/发现
+  - 角色的重大决定/转变
+  - 意外事件/转折
+  - 人物关系的变化（结盟/背叛/分离）
+
+  ## 冲突类型定义
+  - PERSON_VS_PERSON: 人与人之间的冲突（争吵、战斗、竞争、背叛）
+  - PERSON_VS_SELF: 角色内心的矛盾（道德困境、自我怀疑、情感挣扎）
+  - PERSON_VS_SOCIETY: 角色与社会/制度的冲突（反抗规则、阶级矛盾）
+  - PERSON_VS_NATURE: 角色与自然力量的对抗（灾难、疾病、环境挑战）
+  - PERSON_VS_TECHNOLOGY: 角色与科技/人造物的冲突
+  - PERSON_VS_FATE: 角色与命运/天意的对抗（预言、宿命、超自然力量）
+
+  ## 重要程度评分标准
+  - 5: 改变故事全局走向的核心转折（主角死亡、重大背叛、终极对决）
+  - 4: 对主线有显著推动的关键事件（重要战斗、关键决定、重大发现）
+  - 3: 有明确情节推进的普通事件（冲突升级、关系变化）
+  - 2: 过渡性但有信息量的事件（铺垫、伏笔设置）
+  - 1: 仅提供背景信息的事件
+
+  ## 情绪弧线
+  - ↑: 情绪急剧上升（紧张、兴奋、希望增加）
+  - ↓: 情绪急剧下降（悲伤、失望、绝望）
+  - →: 情绪平稳过渡
+  - ↗: 情绪缓慢上升（逐渐紧张）
+  - ↘: 情绪缓慢下降（逐渐释然）
+
+  ## 输出规则
+  1. 按时间顺序输出（eventOrder 从 1 开始递增）
+  2. 参与者尽量使用已知角色列表中的规范名
+  3. chapterIds 标注该事件涉及的所有章节编号
+  4. 确保 JSON 格式完全有效
 
 user_template: |
-  以下是小说的章节内容：
+  以下是小说的章节内容以及已知角色信息。请提取所有关键情节事件。
+
+  {{#characters}}
+  ## 已知角色
+  | 角色名 | 类型 | 描述 |
+  |--------|------|------|
+  {{#characters}}
+  | {{name}} | {{roleType}} | {{description}} |
+  {{/characters}}
+  {{/characters}}
+
+  ## 冲突类型参考
+  {{conflict_types}}
+
+  ## 章节内容
 
   {{#chapters}}
   --- 第{{chapterNumber}}章 {{title}} ---
   {{content}}
   {{/chapters}}
 
+  请以 JSON 数组格式输出所有提取的情节事件。
+
 few_shot:
   - input: |
       第3章 初遇
-      林川走在街上，突然被一个黑衣人拦住。黑衣人递给他一封信，上面写着...
+      林川走在街上，突然被一个黑衣人拦住。黑衣人递给他一封信，上面写着"三日后，城西废庙，不见不散"。林川接过信，心中充满疑惑——谁会给他写信？
     output: |
       {
         "events": [
           {
+            "eventOrder": 1,
             "title": "收到神秘信件",
-            "description": "林川在街上被黑衣人拦住，收到一封重要信件",
-            "participants": ["林川", "黑衣人"],
+            "description": "林川在街上被黑衣人拦住，收到一封约见信，引发对发信人身份的疑惑",
             "location": "街道",
-            "importance": "MAJOR"
+            "timePoint": "白日",
+            "conflictType": "PERSON_VS_PERSON",
+            "participants": ["林川", "黑衣人"],
+            "importance": 3,
+            "emotionalArc": "↑",
+            "chapterIds": [3]
+          }
+        ]
+      }
+
+  - input: |
+      第5章 决裂
+      李明看着眼前的好友，心中五味杂陈。"为什么？"他声音沙哑，"为什么是你出卖了我？"张伟冷冷一笑："兄弟？在这个世界上，只有利益才是永恒的。"李明握紧拳头，指甲深深嵌入掌心。十年友情，在这一刻化为灰烬。
+    output: |
+      {
+        "events": [
+          {
+            "eventOrder": 2,
+            "title": "好友背叛",
+            "description": "李明得知自己最好的朋友张伟是出卖自己的人，十年友情彻底破裂",
+            "location": "未知室内",
+            "timePoint": "未知",
+            "conflictType": "PERSON_VS_PERSON",
+            "participants": ["李明", "张伟"],
+            "importance": 5,
+            "emotionalArc": "↓",
+            "chapterIds": [5]
+          }
+        ]
+      }
+
+  - input: |
+      第8章 暴风雨之夜
+      闪电划破天际，暴雨如注。王芳抱紧双臂，在废墟中瑟瑟发抖。她想起母亲临终前的话："无论遇到什么困难，都要活下去。"她咬紧牙关，从废墟中站起，一步一步走向远方。这一刻，她战胜了恐惧。
+    output: |
+      {
+        "events": [
+          {
+            "eventOrder": 3,
+            "title": "战胜恐惧",
+            "description": "王芳在暴风雨的废墟中回忆起母亲的遗言，克服内心的恐惧重新站起",
+            "location": "废墟",
+            "timePoint": "暴风雨之夜",
+            "conflictType": "PERSON_VS_SELF",
+            "participants": ["王芳"],
+            "importance": 4,
+            "emotionalArc": "↗",
+            "chapterIds": [8]
           }
         ]
       }
 
 output_schema:
-  type: object
-  properties:
-    events:
-      type: array
-      items:
-        type: object
-        properties:
-          title: { type: string }
-          description: { type: string }
-          participants: { type: array, items: { type: string } }
-          location: { type: string }
-          importance: { type: string, enum: [CRITICAL, MAJOR, MINOR] }
-        required: [title, description, participants, importance]
+  type: array
+  items:
+    type: object
+    properties:
+      eventOrder:
+        type: integer
+        description: "事件序号，从1开始按时间顺序递增"
+      title:
+        type: string
+        description: "事件标题，10字以内"
+      description:
+        type: string
+        description: "详细描述，50-200字"
+      location:
+        type: string
+        description: "发生地点"
+      timePoint:
+        type: string
+        description: "时间点描述"
+      conflictType:
+        type: string
+        enum: ["PERSON_VS_PERSON", "PERSON_VS_SELF", "PERSON_VS_SOCIETY", "PERSON_VS_NATURE", "PERSON_VS_TECHNOLOGY", "PERSON_VS_FATE"]
+      participants:
+        type: array
+        items:
+          type: string
+      importance:
+        type: integer
+        minimum: 1
+        maximum: 5
+      emotionalArc:
+        type: string
+        enum: ["↑", "↓", "→", "↗", "↘"]
+      chapterIds:
+        type: array
+        items:
+          type: integer
 
 validation:
   rules:
-    - field: events[].title
+    - field: "[].title"
       rule: notBlank
-    - field: events[].importance
+    - field: "[].importance"
       rule: enum_match
-      param: "CRITICAL,MAJOR,MINOR"
+      param: "1,2,3,4,5"
+    - field: "[].conflictType"
+      rule: enum_match
+      param: "PERSON_VS_PERSON,PERSON_VS_SELF,PERSON_VS_SOCIETY,PERSON_VS_NATURE,PERSON_VS_TECHNOLOGY,PERSON_VS_FATE"
+    - field: "[].emotionalArc"
+      rule: enum_match
+      param: "↑,↓,→,↗,↘"
   retry:
     max_retries: 3
     on_validation_failure: true

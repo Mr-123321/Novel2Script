@@ -1,7 +1,7 @@
 # Scene Segmentation v1.0
 name: scene-segmentation
 version: "1.0"
-description: "将小说情节划分为剧本场景"
+description: "将小说章节切分为影视拍摄场景，基于地点、时间、人物和冲突变化"
 
 model:
   recommended: qwen-max
@@ -9,74 +9,208 @@ model:
   max_tokens: 4096
 
 system: |
-  你是一位专业的影视编剧。
-  请将以下小说情节划分为适合剧本拍摄的场景。
+  你是一位资深的影视编剧和分镜师，擅长将小说叙事转化为可供拍摄的影视场景。
 
-  场景划分原则：
-  - 时间和地点统一：同一时间同一地点为一个场景
-  - 叙事重点：每个场景应有一个明确的戏剧目的
-  - 节奏控制：场景长度适中，避免过长或过短
+  ## 场景切分原则
+
+  当以下任一条件发生变化时，必须切分为新场景：
+
+  1. **地点变化** — 从一处移动到另一处（教室→操场→家中）
+  2. **时间变化** — 明显的时间跳跃（"三天后"、"第二天早上"、"深夜"）
+  3. **人物变化** — 主要角色进出场（>50% 角色更替）
+  4. **冲突变化** — 冲突类型转变或升级（对话→争吵→打斗）
+  5. **章节边界** — 章节自然结束
+
+  ## 场景属性指南
+
+  - **title**: 用 4-8 个字概括场景核心内容（如"街头初遇"、"深夜对峙"）
+  - **location**: 具体地点名称（如"教室"、"操场"、"林川家中"）
+  - **timeOfDay**: 使用标准英文标签 DAWN / MORNING / AFTERNOON / EVENING / NIGHT / LATE_NIGHT / UNKNOWN
+  - **interior**: 室内=true (INT)，室外=false (EXT)
+  - **summary**: 30-80 字概括场景的戏剧目的和核心内容
+  - **mood**: 1-2 个词描述氛围（紧张/温馨/悲伤/恐怖/轻松/凝重）
+  - **sourceReason**: 切分原因（LOCATION / TIME / CHARACTER / CONFLICT / CHAPTER_BOUNDARY）
+
+  ## 倒叙/插叙处理
+
+  如果内容中出现明显的倒叙或插叙，请在 title 中标注（如"【闪回】童年回忆"），
+  并在 summary 中说明时间关系。
 
 user_template: |
-  以下是小说的情节事件：
+  请将以下小说内容切分为影视场景。
+
+  {{#characters}}
+  ## 已知角色
+  {{#characters}}
+  - {{name}} ({{roleType}})
+  {{/characters}}
+  {{/characters}}
 
   {{#events}}
-  - {{title}}: {{description}} (参与者: {{participants}}, 地点: {{location}})
+  ## 剧情事件参考
+  {{#events}}
+  - {{title}}: {{description}}
+  {{/events}}
   {{/events}}
 
-  请将这些事件划分为合理的场景。
+  ## 小说章节
+
+  {{#chapters}}
+  ### 第{{chapterNumber}}章 {{title}}
+  {{content}}
+  {{/chapters}}
+
+  请将以上内容切分为场景，以 JSON 数组格式输出。
 
 few_shot:
   - input: |
-      - 收到神秘信件: 林川在街上被黑衣人拦住... (参与者: 林川,黑衣人, 地点: 街道)
-      - 发现秘密: 林川打开信件后发现内容... (参与者: 林川, 地点: 家中)
+      第1章 开学第一天
+      林川走进教室，同学们正在早自习。"听说了吗？今天有新老师来。"同桌小声说。
+      铃声响起，林川收拾书包走向操场。操场上阳光刺眼，体育老师已经在等他们了。
     output: |
       {
         "scenes": [
           {
-            "scene_number": 1,
-            "title": "街头遭遇",
-            "location": "街道",
-            "time": "白天",
-            "characters": ["林川", "黑衣人"],
-            "summary": "林川在街上被神秘黑衣人拦住并收到信件",
-            "events": ["收到神秘信件"]
+            "sceneNumber": 1,
+            "title": "教室早自习",
+            "location": "教室",
+            "timeOfDay": "MORNING",
+            "interior": true,
+            "summary": "林川走进教室参加早自习，从同桌口中得知新老师要来的消息",
+            "mood": "日常",
+            "characterNames": ["林川", "同桌"],
+            "sourceReason": "LOCATION",
+            "chapterIds": [1]
           },
           {
-            "scene_number": 2,
-            "title": "家中解密",
-            "location": "林川家中",
-            "time": "傍晚",
-            "characters": ["林川"],
-            "summary": "林川回家后打开信件发现惊天秘密",
-            "events": ["发现秘密"]
+            "sceneNumber": 2,
+            "title": "操场体育课",
+            "location": "操场",
+            "timeOfDay": "MORNING",
+            "interior": false,
+            "summary": "体育课在阳光明媚的操场上进行，同学们集合准备上课",
+            "mood": "轻松",
+            "characterNames": ["林川", "体育老师"],
+            "sourceReason": "LOCATION",
+            "chapterIds": [1]
+          }
+        ]
+      }
+
+  - input: |
+      第3章 深夜来访
+      深夜，林川独自在房间里看书。门突然被敲响。
+      "谁？"林川警觉地问。
+      "是我。"门外传来熟悉的声音——是张伟。
+      林川打开门，张伟浑身湿透，神情慌张："出事了，我需要你的帮助。"
+    output: |
+      {
+        "scenes": [
+          {
+            "sceneNumber": 3,
+            "title": "深夜敲门",
+            "location": "林川房间",
+            "timeOfDay": "LATE_NIGHT",
+            "interior": true,
+            "summary": "深夜林川独自在房间看书时，张伟慌张来访求助，气氛骤然紧张",
+            "mood": "紧张",
+            "characterNames": ["林川", "张伟"],
+            "sourceReason": "TIME",
+            "chapterIds": [3]
+          }
+        ]
+      }
+
+  - input: |
+      第5章 决裂
+      李明看着眼前的好友，心中五味杂陈。"为什么？"他声音沙哑，"为什么是你出卖了我？"
+      张伟冷冷一笑，转身离开房间。
+      李明独自站在空荡荡的房间里，握紧拳头。窗外下起了大雨。
+      三天后，李明收拾好行李，离开了这座城市。他回头看了一眼，头也不回地走向火车站。
+    output: |
+      {
+        "scenes": [
+          {
+            "sceneNumber": 5,
+            "title": "好友决裂",
+            "location": "房间内",
+            "timeOfDay": "EVENING",
+            "interior": true,
+            "summary": "李明质问张伟为何背叛自己，两人彻底决裂，张伟冷漠离去",
+            "mood": "凝重",
+            "characterNames": ["李明", "张伟"],
+            "sourceReason": "CONFLICT",
+            "chapterIds": [5]
+          },
+          {
+            "sceneNumber": 6,
+            "title": "独自离去",
+            "location": "火车站",
+            "timeOfDay": "MORNING",
+            "interior": false,
+            "summary": "三天后李明收拾行李离开城市，在火车站回头最后一瞥",
+            "mood": "悲伤",
+            "characterNames": ["李明"],
+            "sourceReason": "TIME",
+            "chapterIds": [5]
           }
         ]
       }
 
 output_schema:
-  type: object
-  properties:
-    scenes:
-      type: array
-      items:
-        type: object
-        properties:
-          scene_number: { type: integer }
-          title: { type: string }
-          location: { type: string }
-          time: { type: string }
-          characters: { type: array, items: { type: string } }
-          summary: { type: string }
-          events: { type: array, items: { type: string } }
-        required: [scene_number, title, location, time, characters, summary]
+  type: array
+  items:
+    type: object
+    properties:
+      sceneNumber:
+        type: integer
+        description: "场景序号，从1开始递增"
+      title:
+        type: string
+        description: "场景标题，4-8字"
+      location:
+        type: string
+        description: "场景地点"
+      timeOfDay:
+        type: string
+        enum: ["DAWN", "MORNING", "AFTERNOON", "EVENING", "NIGHT", "LATE_NIGHT", "UNKNOWN"]
+        description: "场景时间"
+      interior:
+        type: boolean
+        description: "是否室内"
+      summary:
+        type: string
+        description: "场景摘要，30-80字"
+      mood:
+        type: string
+        description: "氛围描述"
+      characterNames:
+        type: array
+        items:
+          type: string
+        description: "出场角色名列表"
+      sourceReason:
+        type: string
+        enum: ["LOCATION", "TIME", "CHARACTER", "CONFLICT", "CHAPTER_BOUNDARY"]
+        description: "切分原因"
+      chapterIds:
+        type: array
+        items:
+          type: integer
+        description: "来源章节编号"
 
 validation:
   rules:
-    - field: scenes[].title
+    - field: "[].title"
       rule: notBlank
-    - field: scenes[].scene_number
-      rule: notNull
+    - field: "[].location"
+      rule: notBlank
+    - field: "[].timeOfDay"
+      rule: enum_match
+      param: "DAWN,MORNING,AFTERNOON,EVENING,NIGHT,LATE_NIGHT,UNKNOWN"
+    - field: "[].sourceReason"
+      rule: enum_match
+      param: "LOCATION,TIME,CHARACTER,CONFLICT,CHAPTER_BOUNDARY"
   retry:
     max_retries: 3
     on_validation_failure: true
