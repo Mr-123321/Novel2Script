@@ -380,6 +380,8 @@ public class CharacterAgent {
     /**
      * Convert a list of raw JSON objects into {@link CharacterExtractionResult} records.
      * Objects that fail to deserialize are silently skipped.
+     * Noise entries (non-name text fragments) are filtered out via
+     * {@link CharacterNameFilter}.
      */
     private List<CharacterExtractionResult> parseCharacterList(List<Object> rawList) {
         List<CharacterExtractionResult> results = new ArrayList<>();
@@ -395,7 +397,8 @@ public class CharacterAgent {
                         e.getMessage());
             }
         }
-        return results;
+        // Post-processing: filter out noise entries (sentence fragments, etc.)
+        return CharacterNameFilter.filter(results);
     }
 
     /**
