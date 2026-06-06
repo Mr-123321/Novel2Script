@@ -261,6 +261,18 @@ public final class CharacterNameFilter {
      * @param name the raw name string to check
      * @return {@code true} if this string is clearly not a person's name
      */
+    // Common adverbial starters that indicate action descriptions, not names
+    private static final java.util.Set<Character> ADVERBIAL_STARTERS = java.util.Set.of(
+            '忽', '突', '猛', '骤', '急', '缓', '轻', '重', '悄', '暗',
+            '偷', '微', '渐', '徐', '疾', '霍', '猝', '遽'
+    );
+
+    // Numeral/quantity starters that indicate non-names
+    private static final java.util.Set<Character> NUMERAL_STARTERS = java.util.Set.of(
+            '一', '两', '三', '四', '五', '六', '七', '八', '九', '十',
+            '几', '数', '多', '少', '各', '每', '某', '众', '全', '半'
+    );
+
     public static boolean isNoiseQuick(String name) {
         if (name == null || name.isBlank()) return true;
         String t = name.trim();
@@ -270,6 +282,10 @@ public final class CharacterNameFilter {
             if (PUNCTUATION_PATTERN.matcher(withoutDot).find()) return true;
         }
         if (t.length() >= 6) return true;
+        // Check adverbial starters: 忽/突/猛/骤... + verb = action description
+        if (t.length() >= 2 && ADVERBIAL_STARTERS.contains(t.charAt(0))) return true;
+        // Check numeral/quantity starters: 一/两/几/众... = not a name
+        if (t.length() >= 1 && NUMERAL_STARTERS.contains(t.charAt(0))) return true;
         // Tier 2: strong reject (speech suffix + word lists only)
         if (t.length() >= 2 && t.length() <= 5) {
             char last = t.charAt(t.length() - 1);

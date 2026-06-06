@@ -315,8 +315,13 @@ public class GenerationOrchestrator {
     }
 
     /**
-     * Resolve which characters are present in a scene.
-     * Uses scene.getCharacterIds() if available, otherwise defaults to first 3 characters.
+     * Resolve which characters are present in a scene for dialogue/action generation.
+     * Uses scene.getCharacterIds() if available; otherwise returns ALL known characters
+     * as candidates for AI generation (does NOT persist — only affects runtime).
+     *
+     * <p>IMPORTANT: This method is a runtime helper for AI agents, NOT a persistence
+     * mechanism. Returning all characters when characterIds is empty allows the AI
+     * to decide who speaks in each scene, preventing the "zero dialogue" cascade failure.
      */
     private List<Character> resolveCharactersForScene(Scene scene, List<Character> allCharacters) {
         if (scene.getCharacterIds() != null && !scene.getCharacterIds().isEmpty()) {
@@ -329,8 +334,12 @@ public class GenerationOrchestrator {
             }
             if (!result.isEmpty()) return result;
         }
-        // Fallback: first min(3, total) characters
-        return allCharacters.subList(0, Math.min(3, allCharacters.size()));
+        // Fallback: return ALL characters so AI can still generate dialogue.
+        // Required because SceneAgent.resolveCharacterIds() may fail to match
+        // character names in chapter text, leaving characterIds empty.
+        log.debug("No character IDs for scene '{}' — using all {} characters as candidates",
+                scene.getTitle(), allCharacters.size());
+        return new ArrayList<>(allCharacters);
     }
 
     private List<PlotEvent> resolveEventsForScene(Scene scene, List<PlotEvent> allEvents) {
@@ -404,7 +413,13 @@ public class GenerationOrchestrator {
         }
 
         if (mockFallbackCount.get() > 0) {
-            scenes = buildDialoguesMock(scenes, characters);
+            // Only fill empty scenes — don't overwrite AI-generated dialogues
+            for (Scene scene : scenes) {
+                if (scene.getDialogues() == null || scene.getDialogues().isEmpty()) {
+                    List<Character> presentChars = resolveCharactersForScene(scene, characters);
+                    scene.setDialogues(buildMockDialoguesForScene(scene, presentChars));
+                }
+            }
         }
 
         log.info("Dialogue generation: AI={}, speech-extract={}, mock={} (parallelism={})",
@@ -435,10 +450,22 @@ public class GenerationOrchestrator {
                 "[\"'\"」』]?");                             // optional closing quote
         java.util.regex.Matcher m = speechPattern.matcher(summary);
 
+        // Noise words that are clearly not character names
+        java.util.Set<String> noiseSpeakers = java.util.Set.of(
+            "他", "她", "它", "我", "你", "您", "俺", "咱", "谁",
+            "一人", "两人", "三人", "众人", "大家", "有人", "某人",
+            "来人", "旁人", "别人", "那人", "这人", "此人",
+            "一个", "这个", "那个", "哪个"
+        );
+
         int seq = 0;
         int groupCount = m.groupCount();
         while (m.find() && seq < 10) {
             String speakerName = m.group(1).trim();
+            // Skip obvious noise — pronouns, quantifiers, single-char non-names
+            if (speakerName.length() <= 1 || noiseSpeakers.contains(speakerName)) {
+                continue;
+            }
             // Safely get content: always use group 2 (the only content group)
             String content = (groupCount >= 2 && m.group(2) != null)
                     ? m.group(2).trim()
@@ -460,11 +487,10 @@ public class GenerationOrchestrator {
                 }
             }
 
-            if (characterId == null && !presentCharacters.isEmpty()) {
-                // Assign to a present character as fallback
-                Character c = presentCharacters.get(seq % presentCharacters.size());
-                characterId = c.getId();
-                matchedName = c.getCanonicalName();
+            // Skip if speaker name doesn't match any known character
+            // (don't force-assign noise like "他"/"众人" to a random character)
+            if (characterId == null) {
+                continue;
             }
 
             Dialogue d = Dialogue.builder()
@@ -538,7 +564,13 @@ public class GenerationOrchestrator {
         }
 
         if (mockFallbackCount.get() > 0) {
-            scenes = buildActionsMock(scenes, characters);
+            // Only fill empty scenes — don't overwrite AI-generated actions
+            for (Scene scene : scenes) {
+                if (scene.getActions() == null || scene.getActions().isEmpty()) {
+                    List<Character> presentChars = resolveCharactersForScene(scene, characters);
+                    scene.setActions(buildMockActionsForScene(scene, presentChars));
+                }
+            }
         }
 
         log.info("Action generation: AI={}, mock={} (parallelism={})",
@@ -825,6 +857,69 @@ public class GenerationOrchestrator {
         if (text.contains("哭") || text.contains("泪") || text.contains("悲伤")) return "悲伤";
         if (text.contains("神秘") || text.contains("秘密") || text.contains("黑影")) return "悬疑";
         return "中性";
+    }
+
+    /** Generate mock dialogues for a SINGLE scene (does not overwrite other scenes). */
+    private List<Dialogue> buildMockDialoguesForScene(Scene scene, List<Character> characters) {
+        String[][] emotionLines = {
+            {"CALM", "嗯，我知道了。"},
+            {"SURPRISED", "什么？这是真的吗？"},
+            {"ANXIOUS", "我们必须尽快行动。"},
+            {"CALM", "说说你的想法。"},
+            {"COLD", "你以为这就能阻止我吗？"},
+            {"ANGRY", "你根本不明白这意味着什么！"},
+            {"FEARFUL", "我……我不知道该怎么办。"},
+            {"PROUD", "我绝不会放弃的。"},
+            {"CALM", "那就这样决定了。"},
+            {"GENTLE", "一切都会好起来的。"},
+        };
+        List<Dialogue> dialogues = new ArrayList<>();
+        if (characters == null || characters.isEmpty()) return dialogues;
+        List<String> names = characters.stream()
+                .map(com.novel2script.domain.model.Character::getCanonicalName)
+                .filter(n -> n != null && !n.isBlank()).toList();
+        if (names.isEmpty()) return dialogues;
+        int count = 2;
+        for (int j = 0; j < count; j++) {
+            String speaker = names.get(j % names.size());
+            Dialogue d = new Dialogue();
+            d.setSceneId(scene.getId());
+            d.setSequence(j + 1);
+            d.setSpeaker(speaker);
+            d.setEmotion(com.novel2script.common.enums.Emotion.valueOf(emotionLines[j][0]));
+            d.setContent(emotionLines[j][1]);
+            d.setCreatedAt(java.time.LocalDateTime.now());
+            d.setCharacterId(characters.get(j % characters.size()).getId());
+            dialogues.add(d);
+        }
+        return dialogues;
+    }
+
+    /** Generate mock actions for a SINGLE scene (does not overwrite other scenes). */
+    private List<com.novel2script.domain.model.Action> buildMockActionsForScene(Scene scene, List<Character> characters) {
+        String[][] templates = {
+            {"ACTION", "缓缓推开门，警惕地环顾四周"},
+            {"REACTION", "惊讶地后退了一步"},
+            {"BEAT", "沉默片刻，深吸一口气"},
+            {"ACTION", "转身走向门口"},
+        };
+        List<com.novel2script.domain.model.Action> actions = new ArrayList<>();
+        int count = 2;
+        for (int j = 0; j < count; j++) {
+            String[] at = templates[j % templates.length];
+            com.novel2script.domain.model.Action a = new com.novel2script.domain.model.Action();
+            a.setSceneId(scene.getId());
+            a.setSequence(j + 1);
+            a.setActionType(at[0]);
+            a.setDescription(at[1]);
+            a.setDurationMs(1500);
+            a.setCreatedAt(java.time.LocalDateTime.now());
+            if (characters != null && !characters.isEmpty()) {
+                a.setCharacterId(characters.get(j % characters.size()).getId());
+            }
+            actions.add(a);
+        }
+        return actions;
     }
 
     private List<Scene> buildDialoguesMock(List<Scene> scenes, List<Character> characters) {
