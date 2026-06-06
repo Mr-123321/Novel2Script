@@ -195,32 +195,32 @@ export function DialogueBlock({
         </div>
       ) : (
         /* ── View Mode ── */
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-x-2 gap-y-0.5 flex-wrap">
           {/* Speaker */}
-          <span className="font-semibold text-teal-400 shrink-0 min-w-[4rem] select-none">
+          <span className="font-semibold text-teal-400 shrink-0 select-none">
             {dialogue.speaker}
           </span>
 
           {/* Emotion badge */}
           {dialogue.emotion && (
-            <span className="text-muted-foreground text-xs shrink-0 select-none">
+            <span className="text-muted-foreground/70 text-[11px] shrink-0 select-none">
               ({emotionLabel(dialogue.emotion)})
             </span>
           )}
 
           {/* Parenthetical */}
           {dialogue.parenthetical && (
-            <span className="text-muted-foreground/60 text-xs shrink-0 italic">
+            <span className="text-muted-foreground/50 text-[11px] shrink-0 italic">
               {dialogue.parenthetical}
             </span>
           )}
 
           {/* Content */}
-          <span className="text-foreground/90">{dialogue.content}</span>
+          <span className="text-foreground/90 min-w-0">{dialogue.content}</span>
 
           {/* Reply indicator */}
           {dialogue.replyTo && (
-            <span className="text-[10px] text-muted-foreground/50 italic shrink-0">
+            <span className="text-[10px] text-muted-foreground/40 italic shrink-0">
               ↳ 回复 #{dialogue.replyTo}
             </span>
           )}
