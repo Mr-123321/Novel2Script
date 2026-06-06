@@ -87,17 +87,16 @@ public class DialogueAgent {
         }
 
         ChatModel model = router.route(TaskType.DIALOGUE_GENERATE);
-        String prompt = buildPrompt(scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
 
         log.info("DialogueAgent generating for scene '{}' with {} characters using model={}",
                 scene.getTitle(), presentCharacters.size(), model);
 
-        ChatResponse response = model.call(
-                new org.springframework.ai.chat.prompt.Prompt(
-                        new org.springframework.ai.chat.messages.UserMessage(prompt)));
+        org.springframework.ai.chat.prompt.Prompt fullPrompt = buildPrompt(
+                scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
+        ChatResponse response = model.call(fullPrompt);
 
         // Log token usage
-        logTokenUsage(response, prompt, "dialogue-generation");
+        logTokenUsage(response, fullPrompt.getContents().toString(), "dialogue-generation");
 
         // ── Log raw response for diagnosis (first 500 chars) ──
         String rawText = response.getResult().getOutput().getText();
@@ -222,19 +221,24 @@ public class DialogueAgent {
 
     // ── Prompt Construction ─────────────────────────────
 
-    private String buildPrompt(Scene scene,
+    private org.springframework.ai.chat.prompt.Prompt buildPrompt(Scene scene,
                                List<Character> presentCharacters,
                                List<PlotEvent> sceneEvents,
                                Scene previousScene,
                                Map<Long, String> characterEmotions) {
-        // Try registered template first
+        // Try registered template first — use render() to include system
+        // message, few-shot examples, and output schema instructions
         PromptTemplate template = promptRegistry.getLatest("dialogue-generation");
         if (template != null) {
             Map<String, Object> vars = buildTemplateVariables(
                     scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
-            return template.renderUserTemplate(vars);
+            return template.render(vars);
         }
-        return buildInlinePrompt(scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
+        // Fallback: inline prompt without template
+        String userContent = buildInlinePrompt(
+                scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
+        return new org.springframework.ai.chat.prompt.Prompt(
+                new org.springframework.ai.chat.messages.UserMessage(userContent));
     }
 
     private Map<String, Object> buildTemplateVariables(Scene scene,

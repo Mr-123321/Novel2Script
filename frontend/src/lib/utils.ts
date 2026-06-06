@@ -52,6 +52,7 @@ export function emotionLabel(emotion: string): string {
 export function roleLabel(role: string): string {
   const labels: Record<string, string> = {
     PROTAGONIST: '主角',
+    DEUTERAGONIST: '重要配角',
     ANTAGONIST: '反派',
     SUPPORTING: '配角',
     MINOR: '龙套',
