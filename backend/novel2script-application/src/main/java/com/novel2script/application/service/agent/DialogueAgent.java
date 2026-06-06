@@ -587,14 +587,15 @@ public class DialogueAgent {
             java.util.regex.Pattern quotePattern = java.util.regex.Pattern.compile(
                     "[「\"'\"](.{2,80})[」\"'\"]");
             java.util.regex.Matcher qm = quotePattern.matcher(text);
+            // Use first character as default speaker for bare quotes (not rotating index)
+            Character defaultChar = (characters != null && !characters.isEmpty()) ? characters.get(0) : null;
             while (qm.find() && seq < 10) {
                 String content = qm.group(1).trim();
-                int idx = seq % (characters != null && !characters.isEmpty() ? characters.size() : 1);
-                Character c = characters != null && !characters.isEmpty() ? characters.get(idx) : null;
+                if (defaultChar == null) break; // skip — no character to assign
                 dialogues.add(Dialogue.builder()
                         .sceneId(scene.getId())
-                        .characterId(c != null ? c.getId() : null)
-                        .speaker(c != null ? c.getCanonicalName() : "未知")
+                        .characterId(defaultChar.getId())
+                        .speaker(defaultChar.getCanonicalName())
                         .content(content)
                         .emotion(com.novel2script.common.enums.Emotion.CALM)
                         .sequence(seq + 1).build());
@@ -670,18 +671,15 @@ public class DialogueAgent {
             java.util.regex.Pattern quotePattern = java.util.regex.Pattern.compile(
                     "[「\"'\"](.{2,80})[」\"'\"]");
             java.util.regex.Matcher qm = quotePattern.matcher(summary);
+            // Use first character as default speaker for bare quotes (not rotating index)
+            Character defaultChar2 = (characters != null && !characters.isEmpty()) ? characters.get(0) : null;
             while (qm.find() && seq < 10) {
                 String content = qm.group(1).trim();
-                Long characterId = characters != null && !characters.isEmpty()
-                        ? characters.get(seq % characters.size()).getId()
-                        : null;
-                String speaker = characters != null && !characters.isEmpty()
-                        ? characters.get(seq % characters.size()).getCanonicalName()
-                        : "未知";
+                if (defaultChar2 == null) break; // skip — no character to assign
                 dialogues.add(Dialogue.builder()
                         .sceneId(scene.getId())
-                        .characterId(characterId)
-                        .speaker(speaker)
+                        .characterId(defaultChar2.getId())
+                        .speaker(defaultChar2.getCanonicalName())
                         .content(content)
                         .emotion(com.novel2script.common.enums.Emotion.CALM)
                         .sequence(seq + 1)
@@ -807,20 +805,8 @@ public class DialogueAgent {
 
         Emotion emotion = Emotion.fromLabel(emotionStr);
 
-        // Resolve character ID
-        Long characterId = null;
-        if (characters != null) {
-            for (Character c : characters) {
-                if (c.getCanonicalName().equals(speaker)) {
-                    characterId = c.getId();
-                    break;
-                }
-                if (c.getAliases() != null && c.getAliases().contains(speaker)) {
-                    characterId = c.getId();
-                    break;
-                }
-            }
-        }
+        // Resolve character ID — use full 5-level matching (same as resolveSpeakerId)
+        Long characterId = resolveSpeakerId(speaker, characters, 0);
 
         return Dialogue.builder()
                 .sceneId(scene.getId())
