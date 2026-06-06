@@ -399,17 +399,26 @@ public class GenerationOrchestrator {
         if (summary == null || summary.isBlank()) return dialogues;
 
         // Patterns for direct speech in Chinese text
-        // e.g. XX说："..."  or "..."XX道  or 「...」XX说
+        // Group 1: speaker name (1-6 chars before speech verb)
+        // Group 2: speech content (2-60 chars after speech marker)
+        // e.g. XX说："..."  or  "..."XX道  or 「...」XX说
         java.util.regex.Pattern speechPattern = java.util.regex.Pattern.compile(
-                "([^：:\"'\"'「『\\s]{1,6})(?:冷冷|淡淡|低声|大声|轻声|小声|怒|笑|哭|吼|喊)?" +
-                "(?:说道|说道：|说：|说|道：|道|喊道|问道|答道|回道|答|问)" +
-                "[：:“\"'\"『「]?(.{2,60})[\"\"」』]?");
+                "([^：:\"'\"'「『\\s]{1,6})" +             // group 1: speaker name
+                "(?:冷冷|淡淡|低声|大声|轻声|小声|怒|笑|哭|吼|喊)?" +  // optional modifier (non-capturing)
+                "(?:说道|说道：|说：|说|道：|道|喊道|问道|答道|回道|答|问)" + // speech verb (non-capturing)
+                "[：:\"'\"『「]?" +                          // optional opening quote/punctuation
+                "(.{2,60})" +                               // group 2: speech content
+                "[\"'\"」』]?");                             // optional closing quote
         java.util.regex.Matcher m = speechPattern.matcher(summary);
 
         int seq = 0;
+        int groupCount = m.groupCount();
         while (m.find() && seq < 10) {
             String speakerName = m.group(1).trim();
-            String content = (m.group(3) != null ? m.group(3) : m.group(2)).trim();
+            // Safely get content: always use group 2 (the only content group)
+            String content = (groupCount >= 2 && m.group(2) != null)
+                    ? m.group(2).trim()
+                    : "";
 
             // Try to match speaker to a present character
             Long characterId = null;

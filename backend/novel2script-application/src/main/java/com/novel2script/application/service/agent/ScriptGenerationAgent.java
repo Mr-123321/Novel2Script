@@ -14,10 +14,14 @@ import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,13 +43,16 @@ public class ScriptGenerationAgent {
     private final PromptRegistry promptRegistry;
     private final AiModelRouter modelRouter;
     private final ObjectMapper objectMapper;
+    private final Map<String, ChatClient> streamingChatClients;
 
     public ScriptGenerationAgent(PromptRegistry promptRegistry,
                                   AiModelRouter modelRouter,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  Map<String, ChatClient> streamingChatClients) {
         this.promptRegistry = promptRegistry;
         this.modelRouter = modelRouter;
         this.objectMapper = objectMapper;
+        this.streamingChatClients = streamingChatClients;
     }
 
     /**
@@ -72,20 +79,16 @@ public class ScriptGenerationAgent {
         ChatModel model = modelRouter.route(TaskType.SCRIPT_COMPOSE);
         String prompt = buildPrompt(template, chapters, novelTitle);
 
+        int totalChars = chapters.stream()
+                .mapToInt(c -> c.getContent() != null ? c.getContent().length() : 0).sum();
         log.info("ScriptGenerationAgent: sending {} chapters ({} chars) to model={}",
-                chapters.size(),
-                chapters.stream().mapToInt(c -> c.getContent() != null ? c.getContent().length() : 0).sum(),
-                model);
+                chapters.size(), totalChars, model);
 
         try {
-            ChatResponse response = model.call(
-                    new org.springframework.ai.chat.prompt.Prompt(
-                            new org.springframework.ai.chat.messages.UserMessage(prompt)));
+            // ── Try streaming first (SSE) to avoid read-timeout on long generations ──
+            String responseText = callWithStreaming(model, prompt);
 
-            // ── Log token usage ──
-            logTokenUsage(response, prompt);
-
-            String responseText = response.getResult().getOutput().getText();
+            // ── Log token usage (estimated from char counts) ──
             log.info("ScriptGenerationAgent: received response ({} chars)", responseText.length());
 
             Script script = parseScriptResponse(responseText, scriptId);
@@ -123,33 +126,144 @@ public class ScriptGenerationAgent {
 
     /**
      * Parse the AI response into a Script domain object.
-     * Handles both markdown-wrapped JSON and bare JSON.
+     * Handles multiple response formats the model might produce:
+     * <ol>
+     *   <li>{@code {"script": {...}}} — standard format</li>
+     *   <li>{@code {...}} with script-like keys (characters, scenes) at root</li>
+     *   <li>Alternative wrapper keys: {@code output}, {@code result}, {@code content}</li>
+     *   <li>Markdown-fenced JSON with explanatory text</li>
+     *   <li>Pure text (no JSON) — logs warning, returns null for graceful degradation</li>
+     * </ol>
      */
     private Script parseScriptResponse(String responseText, Long scriptId) {
+        // ── Log raw response for diagnosis ──
+        log.debug("ScriptGenerationAgent: raw response (first 800 chars):\n{}",
+                responseText.length() > 800 ? responseText.substring(0, 800) + "…" : responseText);
+
         String json = CharacterAgent.extractJson(responseText);
         if (json == null) {
-            log.warn("ScriptGenerationAgent: no JSON found in response");
-            return null;
+            log.warn("ScriptGenerationAgent: no JSON found in AI response — "
+                    + "response may be plain text. Attempting text-based fallback...");
+            return buildScriptFromText(responseText, scriptId);
         }
 
+        log.debug("ScriptGenerationAgent: extracted JSON block ({} chars)", json.length());
+
         try {
+            @SuppressWarnings("unchecked")
             Map<String, Object> root = objectMapper.readValue(json,
                     new TypeReference<Map<String, Object>>() {});
 
+            // ── Strategy 1: Look for "script" wrapper key ──
             @SuppressWarnings("unchecked")
             Map<String, Object> scriptData = (Map<String, Object>) root.get("script");
-            if (scriptData == null) {
-                log.warn("ScriptGenerationAgent: no 'script' key in response");
-                return null;
+            if (scriptData != null && !scriptData.isEmpty()) {
+                return buildScript(scriptData, scriptId);
             }
 
-            return buildScript(scriptData, scriptId);
+            // ── Strategy 2: Try alternative wrapper keys ──
+            for (String altKey : List.of("output", "result", "content", "data")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> altData = (Map<String, Object>) root.get(altKey);
+                if (altData != null && !altData.isEmpty()) {
+                    log.info("ScriptGenerationAgent: using alternative key '{}' as script data", altKey);
+                    return buildScript(altData, scriptId);
+                }
+            }
+
+            // ── Strategy 3: Root itself looks like script data ──
+            // If root has "characters" or "scenes" key, treat it as the script
+            if (root.containsKey("characters") || root.containsKey("scenes")
+                    || root.containsKey("title")) {
+                log.info("ScriptGenerationAgent: root object has script-like keys, using as script data");
+                return buildScript(root, scriptId);
+            }
+
+            // ── Strategy 4: Try nested alternatives ──
+            // Some models wrap in extra layers: {"choices": [{"message": {"content": "{\"script\":...}"}}]}
+            if (root.containsKey("choices")) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> choices = (List<Map<String, Object>>) root.get("choices");
+                if (choices != null && !choices.isEmpty()) {
+                    Map<String, Object> choice = choices.get(0);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> message = (Map<String, Object>) choice.get("message");
+                    if (message != null) {
+                        Object contentObj = message.get("content");
+                        if (contentObj instanceof String contentStr) {
+                            log.info("ScriptGenerationAgent: found nested choices[0].message.content, re-parsing");
+                            return parseScriptResponse(contentStr, scriptId); // recursive
+                        }
+                    }
+                }
+            }
+
+            log.warn("ScriptGenerationAgent: JSON parsed but no recognizable script structure found. "
+                    + "Root keys: {}", root.keySet());
+            return null;
+
         } catch (Exception e) {
             log.error("ScriptGenerationAgent: JSON parse failed: {}", e.getMessage());
-            log.debug("  Response (first 500 chars): {}",
-                    responseText.length() > 500 ? responseText.substring(0, 500) + "..." : responseText);
+            log.debug("  Failed JSON (first 500 chars): {}",
+                    json.length() > 500 ? json.substring(0, 500) + "..." : json);
             return null;
         }
+    }
+
+    /**
+     * Last-resort fallback: try to build a minimal script from plain-text response.
+     * The AI sometimes returns a narrative description instead of structured JSON.
+     */
+    private Script buildScriptFromText(String text, Long scriptId) {
+        if (text == null || text.isBlank()) return null;
+
+        log.warn("ScriptGenerationAgent: building minimal script from plain-text response ({} chars)", text.length());
+
+        // Create a single placeholder character to hold the raw output
+        Character placeholder = new Character();
+        placeholder.setId(scriptId * 1000);
+        placeholder.setScriptId(scriptId);
+        placeholder.setCanonicalName("AI_Response");
+        placeholder.setRoleType(CharacterRoleType.SUPPORTING);
+        placeholder.setDescription("AI 模型返回的原始文本响应（非结构化）");
+        placeholder.setPersonality(List.of());
+        placeholder.setAliases(List.of());
+        placeholder.setResolved(true);
+        placeholder.setCreatedAt(LocalDateTime.now());
+
+        // Create a single scene containing the raw text summary
+        Scene rawScene = new Scene();
+        rawScene.setId(scriptId * 1000 + 100);
+        rawScene.setScriptId(scriptId);
+        rawScene.setSceneNumber(1);
+        rawScene.setLocation("未知");
+        rawScene.setTimeOfDay(TimeOfDay.UNKNOWN);
+        rawScene.setInterior(true);
+        rawScene.setTitle("AI 原始响应");
+        rawScene.setSummary(text.length() > 200 ? text.substring(0, 200) + "…" : text);
+        rawScene.setMood("中性");
+        rawScene.setSourceReason(SourceReason.CHAPTER_BOUNDARY);
+        rawScene.setChapterIds(new ArrayList<>());
+        rawScene.setCharacterIds(List.of(placeholder.getId()));
+        rawScene.setDialogues(new ArrayList<>());
+        rawScene.setActions(new ArrayList<>());
+        rawScene.setCreatedAt(LocalDateTime.now());
+
+        Script script = new Script();
+        script.setId(scriptId);
+        script.setTitle("AI 原始响应（非结构化）");
+        script.setCharacters(List.of(placeholder));
+        script.setScenes(List.of(rawScene));
+        script.setPlotEvents(new ArrayList<>());
+        script.setCharacterCount(1);
+        script.setSceneCount(1);
+        script.setDialogueCount(0);
+        script.setVersion(1);
+
+        log.warn("ScriptGenerationAgent: returned fallback script from plain text — "
+                + "this indicates the AI model did not follow the JSON output format. "
+                + "Consider updating the prompt template or switching models.");
+        return script;
     }
 
     @SuppressWarnings("unchecked")
@@ -342,6 +456,74 @@ public class ScriptGenerationAgent {
         if (val instanceof Boolean b) return b;
         if (val instanceof String s) return Boolean.parseBoolean(s);
         return defaultVal;
+    }
+
+    /**
+     * Call the AI model with streaming (SSE) for long-generation tasks.
+     * Falls back to blocking call if streaming is not supported.
+     *
+     * <p>Streaming keeps the HTTP connection alive by sending data incrementally,
+     * preventing {@code SocketTimeoutException} during multi-minute generations.
+     *
+     * @param model  the chat model (may or may not implement {@link StreamingChatModel})
+     * @param prompt the rendered user prompt
+     * @return the complete AI response text
+     */
+    private String callWithStreaming(ChatModel model, String prompt) {
+        // Attempt streaming via ChatClient (uses SSE under the hood)
+        String provider = TaskType.SCRIPT_COMPOSE.getDefaultProvider();
+        ChatClient streamingClient = streamingChatClients.get(provider);
+
+        if (streamingClient != null) {
+            try {
+                log.info("ScriptGenerationAgent: using SSE streaming for generation");
+                StringBuilder fullResponse = new StringBuilder();
+
+                Flux<ChatResponse> stream = streamingClient.prompt()
+                        .user(prompt)
+                        .stream()
+                        .chatResponse();
+
+                // Collect all SSE chunks with a 120s timeout
+                List<ChatResponse> chunks = stream
+                        .collectList()
+                        .block(Duration.ofSeconds(120));
+
+                if (chunks != null && !chunks.isEmpty()) {
+                    for (ChatResponse chunk : chunks) {
+                        if (chunk.getResult() != null
+                                && chunk.getResult().getOutput() != null
+                                && chunk.getResult().getOutput().getText() != null) {
+                            fullResponse.append(chunk.getResult().getOutput().getText());
+                        }
+                    }
+                    String text = fullResponse.toString();
+                    if (!text.isBlank()) {
+                        log.info("ScriptGenerationAgent: streaming collected {} chunks → {} chars",
+                                chunks.size(), text.length());
+                        return text;
+                    }
+                }
+                log.warn("ScriptGenerationAgent: streaming returned empty, falling back to blocking call");
+            } catch (Exception e) {
+                log.warn("ScriptGenerationAgent: streaming failed ({}), falling back to blocking call",
+                        e.getMessage());
+            }
+        }
+
+        // ── Blocking fallback (uses increased 120s readTimeout) ──
+        log.info("ScriptGenerationAgent: using blocking call (readTimeout=120s)");
+        try {
+            ChatResponse response = model.call(
+                    new org.springframework.ai.chat.prompt.Prompt(
+                            new org.springframework.ai.chat.messages.UserMessage(prompt)));
+
+            logTokenUsage(response, prompt);
+            return response.getResult().getOutput().getText();
+        } catch (Exception e) {
+            log.error("ScriptGenerationAgent: blocking call also failed: {}", e.getMessage());
+            throw new RuntimeException("AI generation failed: " + e.getMessage(), e);
+        }
     }
 
     /**

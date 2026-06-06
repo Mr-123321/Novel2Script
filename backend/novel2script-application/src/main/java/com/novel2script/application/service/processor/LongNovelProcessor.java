@@ -122,6 +122,29 @@ public class LongNovelProcessor {
     }
 
     /**
+     * Get context using hybrid retrieval (vector + keyword) for improved recall.
+     * Recommended for plot event extraction, character-centric queries, and
+     * entity-heavy tasks where keyword matching complements semantic search.
+     *
+     * @param taskQuery     natural language task description
+     * @param allChunks     all chunks from preprocessing
+     * @param vectorWeight  weight of vector scores (0.0–1.0), 0.6 is a good default
+     * @return assembled context with higher recall from hybrid search
+     */
+    public String getHybridTaskContext(String taskQuery, List<NovelChunk> allChunks,
+                                        float vectorWeight) {
+        return contextBuilder.buildHybridContext(taskQuery, allChunks,
+                MAX_CONTEXT_TOKENS, vectorWeight);
+    }
+
+    /**
+     * Get hybrid context with default vector weight (0.6).
+     */
+    public String getHybridTaskContext(String taskQuery, List<NovelChunk> allChunks) {
+        return getHybridTaskContext(taskQuery, allChunks, 0.6f);
+    }
+
+    /**
      * Filter chunks that are relevant to the given task query.
      * Returns the chunks themselves (not just the context text) for
      * cases where agents need per-chunk processing.
@@ -203,6 +226,7 @@ public class LongNovelProcessor {
                 metadata.put("chapter_ids", chunk.chapterIds());
                 metadata.put("token_count", chunk.tokenCount());
                 metadata.put("novel_id", chunk.novelId());
+                metadata.put("content", chunk.content());  // enables keyword indexing for hybrid search
 
                 vectorStore.insertCharacter(chunk.chunkId(), embedding, metadata);
                 stored.incrementAndGet();

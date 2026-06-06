@@ -20,6 +20,9 @@ public class MultiModelProperties {
     /** Per-provider configurations keyed by provider name. */
     private Map<String, ProviderConfig> providers = new HashMap<>();
 
+    /** Embedding model configuration. */
+    private EmbeddingConfig embedding = new EmbeddingConfig();
+
     // ── Getters / Setters ─────────────────────────────────
 
     public String getDefaultProvider() {
@@ -36,6 +39,14 @@ public class MultiModelProperties {
 
     public void setProviders(Map<String, ProviderConfig> providers) {
         this.providers = providers;
+    }
+
+    public EmbeddingConfig getEmbedding() {
+        return embedding;
+    }
+
+    public void setEmbedding(EmbeddingConfig embedding) {
+        this.embedding = embedding;
     }
 
     /**
@@ -90,12 +101,14 @@ public class MultiModelProperties {
     }
 
     /**
-     * Chat completion options (model, temperature, max-tokens).
+     * Chat completion options (model, temperature, max-tokens, stream).
      */
     public static class ChatOptions {
         private String model = "deepseek-chat";
         private double temperature = 0.7;
         private int maxTokens = 4096;
+        /** Enable SSE streaming to prevent read-timeout during long AI generations. */
+        private boolean stream = true;
 
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
@@ -105,5 +118,26 @@ public class MultiModelProperties {
 
         public int getMaxTokens() { return maxTokens; }
         public void setMaxTokens(int maxTokens) { this.maxTokens = maxTokens; }
+
+        public boolean isStream() { return stream; }
+        public void setStream(boolean stream) { this.stream = stream; }
+    }
+
+    /**
+     * Embedding model configuration (maps to {@code spring.ai.embedding.*} in YAML).
+     * Controls which model is used for text vectorization.
+     */
+    public static class EmbeddingConfig {
+        /** Embedding model name (e.g. "text-embedding-v1" for Qwen). */
+        private String model = "text-embedding-v1";
+
+        /** Whether to enable the embedding model. If false, hash-based fallback is used. */
+        private boolean enabled = true;
+
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
     }
 }

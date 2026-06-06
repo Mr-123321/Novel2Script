@@ -345,9 +345,11 @@ public class DialogueAgent {
                 - parenthetical: 括号说明（如"(低声)"、"(冷笑)"、"(犹豫)"，无则填null）
                 - replyTo: 回复的对白序号（从0开始，首句为0）
 
-                ⚠️ 重要：
-                - 如果场景中没有角色之间的直接对话（只有动作/环境/叙事描述），必须返回空数组：[]
-                - 绝对不要编造原文中不存在的对话！
+                ⚠️ 重要提示：
+                - 请基于场景氛围和角色性格**主动创作**合理的对话，不要只返回空数组
+                - 即使原文没有逐字对话，也可以根据场景冲突和角色关系**推断**他们会说什么
+                - 每个场景至少生成 2-4 句对话（如果有2个或以上角色在场）
+                - 只有场景中只有**一个角色且无说话对象**时，才返回空数组
 
                 ```json
                 [{
@@ -359,7 +361,7 @@ public class DialogueAgent {
                 }]
                 ```
 
-                请确保输出是有效的 JSON 数组。如果无对话则输出 []。
+                请确保输出是有效的 JSON 数组。
                 """);
 
         return sb.toString();
@@ -529,7 +531,97 @@ public class DialogueAgent {
             }
         }
 
+        // ── Fallback: if AI returned 0 dialogues, try regex extraction from scene summary ──
+        if (dialogues.isEmpty() && scene.getSummary() != null && !scene.getSummary().isBlank()) {
+            dialogues = extractDialoguesFromSummary(scene, characters);
+            if (!dialogues.isEmpty()) {
+                log.info("DialogueAgent: extracted {} dialogues from scene summary fallback for '{}'",
+                        dialogues.size(), scene.getTitle());
+            }
+        }
+
         return dialogues;
+    }
+
+    /**
+     * Last-resort fallback: extract quoted speech from scene summary text
+     * using regex patterns. Handles Chinese speech markers (说、道、问 etc.)
+     * and direct quotes (「」, "", etc.).
+     */
+    private List<Dialogue> extractDialoguesFromSummary(Scene scene, List<Character> characters) {
+        List<Dialogue> dialogues = new ArrayList<>();
+        String summary = scene.getSummary();
+        if (summary == null || summary.isBlank()) return dialogues;
+
+        // Pattern 1: SpeakerName(optional modifier) + speechVerb + "content"
+        java.util.regex.Pattern speechPattern = java.util.regex.Pattern.compile(
+                "([^：:\"'\"'「『\\s]{1,6})" +
+                "(?:冷冷|淡淡|低声|大声|轻声|小声|怒|笑|哭|吼|喊)?" +
+                "(?:说道|说道：|说：|说|道：|道|喊道|问道|答道|回道|答|问)" +
+                "[：:\"'\"『「]?" +
+                "(.{2,60})" +
+                "[\"'\"」』]?");
+        java.util.regex.Matcher m = speechPattern.matcher(summary);
+
+        int seq = 0;
+        while (m.find() && seq < 10) {
+            String speakerName = m.group(1).trim();
+            String content = m.groupCount() >= 2 && m.group(2) != null
+                    ? m.group(2).trim() : "";
+            if (content.isEmpty()) continue;
+
+            Long characterId = resolveSpeakerId(speakerName, characters, seq);
+            dialogues.add(Dialogue.builder()
+                    .sceneId(scene.getId())
+                    .characterId(characterId)
+                    .speaker(speakerName)
+                    .content(content)
+                    .emotion(com.novel2script.common.enums.Emotion.CALM)
+                    .sequence(seq + 1)
+                    .build());
+            seq++;
+        }
+
+        // If pattern 1 found nothing, try pattern 2: 「...」 or "..." or "..."
+        if (dialogues.isEmpty()) {
+            java.util.regex.Pattern quotePattern = java.util.regex.Pattern.compile(
+                    "[「\"'\"](.{2,80})[」\"'\"]");
+            java.util.regex.Matcher qm = quotePattern.matcher(summary);
+            while (qm.find() && seq < 10) {
+                String content = qm.group(1).trim();
+                Long characterId = characters != null && !characters.isEmpty()
+                        ? characters.get(seq % characters.size()).getId()
+                        : null;
+                String speaker = characters != null && !characters.isEmpty()
+                        ? characters.get(seq % characters.size()).getCanonicalName()
+                        : "未知";
+                dialogues.add(Dialogue.builder()
+                        .sceneId(scene.getId())
+                        .characterId(characterId)
+                        .speaker(speaker)
+                        .content(content)
+                        .emotion(com.novel2script.common.enums.Emotion.CALM)
+                        .sequence(seq + 1)
+                        .build());
+                seq++;
+            }
+        }
+
+        return dialogues;
+    }
+
+    /** Resolve a speaker name to a character ID from the present characters list. */
+    private Long resolveSpeakerId(String speakerName, List<Character> characters, int fallbackIndex) {
+        if (characters == null || characters.isEmpty()) return null;
+        for (Character c : characters) {
+            if (c.getCanonicalName() != null && c.getCanonicalName().contains(speakerName)) {
+                return c.getId();
+            }
+            if (speakerName.contains(c.getCanonicalName())) {
+                return c.getId();
+            }
+        }
+        return characters.get(fallbackIndex % characters.size()).getId();
     }
 
     /**
