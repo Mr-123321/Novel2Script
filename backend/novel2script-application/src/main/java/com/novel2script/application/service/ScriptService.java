@@ -1,5 +1,6 @@
 package com.novel2script.application.service;
 
+import com.novel2script.common.enums.Emotion;
 import com.novel2script.common.enums.ScriptStatus;
 import com.novel2script.common.enums.WorkflowStep;
 import com.novel2script.common.exception.BusinessException;
@@ -9,6 +10,7 @@ import com.novel2script.domain.model.PlotEvent;
 import com.novel2script.domain.model.Scene;
 import com.novel2script.domain.model.Script;
 import com.novel2script.domain.model.Character;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -101,6 +103,14 @@ public class ScriptService {
         return Optional.empty();
     }
 
+    /** Save (upsert) a script to the in-memory store. */
+    public void save(Script script) {
+        if (script.getId() == null) {
+            script.setId(idGenerator.getAndIncrement());
+        }
+        store.put(script.getId(), script);
+    }
+
     /**
      * Same as {@link #findById} but produces no log output.
      * Used by SSE polling loop to avoid flooding the log every 2 seconds.
@@ -191,6 +201,144 @@ public class ScriptService {
         script.setStatus(ScriptStatus.FAILED);
         script.setUpdatedAt(LocalDateTime.now());
         log.warn("Script marked FAILED: id={}", scriptId);
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  Paragraph CRUD — actions & dialogues
+    // ─────────────────────────────────────────────────────
+
+    private Scene getSceneOrThrow(Script script, Long sceneId) {
+        if (script.getScenes() == null) {
+            throw new IllegalArgumentException("场景列表为空");
+        }
+        return script.getScenes().stream()
+                .filter(s -> s.getId().equals(sceneId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("场景不存在: sceneId=" + sceneId));
+    }
+
+    public void addAction(Long scriptId, Long sceneId, Action action) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+        if (scene.getActions() == null) scene.setActions(new ArrayList<>());
+        scene.getActions().add(action);
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Action added: scriptId={}, sceneId={}, actionId={}", scriptId, sceneId, action.getId());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void updateAction(Long scriptId, Long sceneId, Long actionId, Map<String, Object> updates) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+
+        Action action = scene.getActions().stream()
+                .filter(a -> a.getId().equals(actionId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("动作不存在: actionId=" + actionId));
+
+        if (updates.containsKey("description")) action.setDescription((String) updates.get("description"));
+        if (updates.containsKey("actionType")) action.setActionType((String) updates.get("actionType"));
+        if (updates.containsKey("sequence")) action.setSequence(((Number) updates.get("sequence")).intValue());
+        if (updates.containsKey("characterId")) action.setCharacterId(((Number) updates.get("characterId")).longValue());
+        if (updates.containsKey("durationMs")) action.setDurationMs(((Number) updates.get("durationMs")).intValue());
+
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Action updated: scriptId={}, sceneId={}, actionId={}", scriptId, sceneId, actionId);
+    }
+
+    public void deleteAction(Long scriptId, Long sceneId, Long actionId) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+
+        boolean removed = scene.getActions().removeIf(a -> a.getId().equals(actionId));
+        if (!removed) throw new IllegalArgumentException("动作不存在: actionId=" + actionId);
+
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Action deleted: scriptId={}, sceneId={}, actionId={}", scriptId, sceneId, actionId);
+    }
+
+    public void addDialogue(Long scriptId, Long sceneId, Dialogue dialogue) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+        if (scene.getDialogues() == null) scene.setDialogues(new ArrayList<>());
+        scene.getDialogues().add(dialogue);
+        script.setUpdatedAt(LocalDateTime.now());
+        // Update dialogue count
+        script.setDialogueCount(script.getScenes().stream()
+                .mapToInt(s -> s.getDialogues() != null ? s.getDialogues().size() : 0).sum());
+        log.info("Dialogue added: scriptId={}, sceneId={}, dialogueId={}", scriptId, sceneId, dialogue.getId());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void updateDialogue(Long scriptId, Long sceneId, Long dialogueId, Map<String, Object> updates) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+
+        Dialogue dialogue = scene.getDialogues().stream()
+                .filter(d -> d.getId().equals(dialogueId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("对白不存在: dialogueId=" + dialogueId));
+
+        if (updates.containsKey("speaker")) dialogue.setSpeaker((String) updates.get("speaker"));
+        if (updates.containsKey("content")) dialogue.setContent((String) updates.get("content"));
+        if (updates.containsKey("emotion")) {
+            String emotionStr = (String) updates.get("emotion");
+            dialogue.setEmotion(Emotion.fromLabel(emotionStr));
+        }
+        if (updates.containsKey("sequence")) dialogue.setSequence(((Number) updates.get("sequence")).intValue());
+        if (updates.containsKey("characterId")) dialogue.setCharacterId(((Number) updates.get("characterId")).longValue());
+        if (updates.containsKey("parenthetical")) dialogue.setParenthetical((String) updates.get("parenthetical"));
+
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Dialogue updated: scriptId={}, sceneId={}, dialogueId={}", scriptId, sceneId, dialogueId);
+    }
+
+    public void deleteDialogue(Long scriptId, Long sceneId, Long dialogueId) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+
+        boolean removed = scene.getDialogues().removeIf(d -> d.getId().equals(dialogueId));
+        if (!removed) throw new IllegalArgumentException("对白不存在: dialogueId=" + dialogueId);
+
+        script.setUpdatedAt(LocalDateTime.now());
+        // Update dialogue count
+        script.setDialogueCount(script.getScenes().stream()
+                .mapToInt(s -> s.getDialogues() != null ? s.getDialogues().size() : 0).sum());
+        log.info("Dialogue deleted: scriptId={}, sceneId={}, dialogueId={}", scriptId, sceneId, dialogueId);
+    }
+
+    @SuppressWarnings("unchecked")
+    public void reorderSceneContent(Long scriptId, Long sceneId, List<Map<String, Object>> items) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+        Scene scene = getSceneOrThrow(script, sceneId);
+
+        // items: [{type: "action"|"dialogue", id: number, sequence: number}, ...]
+        for (Map<String, Object> item : items) {
+            String type = (String) item.get("type");
+            Long itemId = ((Number) item.get("id")).longValue();
+            int sequence = ((Number) item.get("sequence")).intValue();
+
+            if ("action".equals(type)) {
+                scene.getActions().stream()
+                        .filter(a -> a.getId().equals(itemId))
+                        .findFirst()
+                        .ifPresent(a -> a.setSequence(sequence));
+            } else if ("dialogue".equals(type)) {
+                scene.getDialogues().stream()
+                        .filter(d -> d.getId().equals(itemId))
+                        .findFirst()
+                        .ifPresent(d -> d.setSequence(sequence));
+            }
+        }
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Scene content reordered: scriptId={}, sceneId={}, items={}", scriptId, sceneId, items.size());
     }
 
     public void updateYaml(Long scriptId, String yamlContent) {

@@ -14,6 +14,16 @@ export type WorkflowStep =
   | 'YAML_EXPORT'
   | 'STORYBOARD_GENERATE';
 
+export interface PlotInsertion {
+  id: number;
+  scriptId: number;
+  text: string;
+  position: number; // 0 = before first scene, N = after scene N
+  insertedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Script {
   id: number;
   novelId: number;
@@ -28,6 +38,7 @@ export interface Script {
   scenes: Scene[];
   characters: Character[];
   plotEvents: PlotEvent[];
+  plotInsertions: PlotInsertion[];
   workflowState?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

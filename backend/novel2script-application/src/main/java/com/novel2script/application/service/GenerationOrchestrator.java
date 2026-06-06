@@ -53,6 +53,8 @@ public class GenerationOrchestrator {
     private final DialogueAgent dialogueAgent;
     private final ActionAgent actionAgent;
     private final ScriptComposer scriptComposer;
+    /** Global counter for dialogue IDs assigned in fallback extraction */
+    private final java.util.concurrent.atomic.AtomicLong dialogueIdSeq = new java.util.concurrent.atomic.AtomicLong(50000);
 
     public GenerationOrchestrator(ScriptService scriptService,
                                   NovelService novelService,
@@ -466,6 +468,7 @@ public class GenerationOrchestrator {
             }
 
             Dialogue d = Dialogue.builder()
+                    .id(dialogueIdSeq.getAndIncrement())
                     .sceneId(scene.getId())
                     .characterId(characterId)
                     .speaker(matchedName)

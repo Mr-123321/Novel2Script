@@ -154,6 +154,18 @@ public final class CharacterNameFilter {
     );
 
     /**
+     * Body part characters — if a name contains a body part character
+     * AND an action character, it's likely a description, not a name.
+     * e.g., "睫毛颤动", "手指轻弹", "垂落的睫毛"
+     */
+    private static final Set<Character> BODY_PART_CHARS = Set.of(
+            '头', '眼', '睛', '耳', '鼻', '嘴', '唇', '舌', '牙',
+            '脸', '额', '眉', '睫', '手', '掌', '指', '拳', '臂', '肘',
+            '肩', '颈', '胸', '背', '腰', '腹', '腿', '膝', '脚', '趾',
+            '身', '躯', '体', '肤', '肌', '骨', '血', '泪', '汗', '毛', '发'
+    );
+
+    /**
      * Common nouns that refer to groups/roles, not individual names.
      */
     private static final Set<String> NON_NAME_NOUNS = Set.of(
@@ -238,6 +250,47 @@ public final class CharacterNameFilter {
      */
     public static boolean isNoise(CharacterExtractionResult character) {
         return getNoiseReason(character) != null;
+    }
+
+    /**
+     * Quick check on a raw name string — useful for filtering speaker names
+     * extracted from narration text (e.g., in {@code DialogueAgent}).
+     * Only applies Tier 1 (hard reject) and Tier 2 (strong reject) checks,
+     * skipping Tier 3 (which requires description context).
+     *
+     * @param name the raw name string to check
+     * @return {@code true} if this string is clearly not a person's name
+     */
+    public static boolean isNoiseQuick(String name) {
+        if (name == null || name.isBlank()) return true;
+        String t = name.trim();
+        // Tier 1: hard reject
+        if (PUNCTUATION_PATTERN.matcher(t).find()) {
+            String withoutDot = t.replace("·", "");
+            if (PUNCTUATION_PATTERN.matcher(withoutDot).find()) return true;
+        }
+        if (t.length() >= 6) return true;
+        // Tier 2: strong reject (speech suffix + word lists only)
+        if (t.length() >= 2 && t.length() <= 5) {
+            char last = t.charAt(t.length() - 1);
+            if (SPEECH_ACTION_SUFFIX_CHARS.contains(last)) {
+                String stem = t.substring(0, t.length() - 1);
+                String resolved = stripAdverbialParticles(stem);
+                if (resolved.length() >= 1
+                        && (COMMON_ADJECTIVES.contains(resolved)
+                            || COMMON_VERBS.contains(resolved))) return true;
+            }
+        }
+        if (t.length() >= 3 && !hasCommonSurname(t)) {
+            for (int i = 0; i < t.length(); i++) {
+                if (BODY_PART_CHARS.contains(t.charAt(i))) return true;
+            }
+        }
+        if (COMMON_VERBS.contains(t)) return true;
+        if (COMMON_ADJECTIVES.contains(t)) return true;
+        if (FUNCTION_WORDS.contains(t)) return true;
+        if (NON_NAME_NOUNS.contains(t)) return true;
+        return false;
     }
 
     // ── Noise detection logic ──────────────────────────────
@@ -347,6 +400,22 @@ public final class CharacterNameFilter {
                         return "adjective/verb + '" + suffix + "'";
                     }
                 }
+            }
+        }
+
+        // 2e. Contains body part character → likely description, not name
+        //     e.g., "睫毛颤动", "垂落的睫毛", "手指轻弹"
+        //     Exception: names with common surnames (e.g., "林眉" is a real name)
+        if (trimmed.length() >= 3 && !hasCommonSurname(trimmed)) {
+            boolean hasBodyPart = false;
+            for (int i = 0; i < trimmed.length(); i++) {
+                if (BODY_PART_CHARS.contains(trimmed.charAt(i))) {
+                    hasBodyPart = true;
+                    break;
+                }
+            }
+            if (hasBodyPart) {
+                return "contains body part character — likely description";
             }
         }
 

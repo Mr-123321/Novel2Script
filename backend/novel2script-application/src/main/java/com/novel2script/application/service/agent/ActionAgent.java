@@ -52,6 +52,8 @@ public class ActionAgent {
     private final AiModelRouter router;
     private final PromptRegistry promptRegistry;
     private final ObjectMapper objectMapper;
+    /** Global sequence for assigning unique IDs to parsed actions */
+    private final java.util.concurrent.atomic.AtomicLong actionIdSeq = new java.util.concurrent.atomic.AtomicLong(10000);
 
     public ActionAgent(AiModelRouter router,
                        PromptRegistry promptRegistry,
@@ -440,6 +442,7 @@ public class ActionAgent {
                 }
 
                 Action action = Action.builder()
+                        .id(actionIdSeq.getAndIncrement())
                         .sceneId(sceneId)
                         .characterId(null) // resolved in enrichActions
                         .sequence(sequence)
