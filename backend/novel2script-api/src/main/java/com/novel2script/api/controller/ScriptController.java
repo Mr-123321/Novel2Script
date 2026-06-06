@@ -259,20 +259,31 @@ public class ScriptController {
 
     @PutMapping("/{id}/characters/{characterId}")
     @Operation(summary = "更新剧本中指定角色的信息")
-    public ResponseEntity<Map<String, Object>> updateCharacter(
+    public ResponseEntity<Object> updateCharacter(
             @PathVariable Long id,
             @PathVariable Long characterId,
             @RequestBody Map<String, Object> updates) {
 
         log.info("Update character: scriptId={}, characterId={}", id, characterId);
 
-        // Placeholder — in production this would delegate to ScriptService
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("scriptId", id);
-        response.put("characterId", characterId);
-        response.put("updated", true);
-        response.put("message", "角色更新已接收（功能开发中）");
-        return ResponseEntity.ok(response);
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    try {
+                        scriptService.updateCharacter(id, characterId, updates);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> response = new LinkedHashMap<>();
+                    response.put("scriptId", id);
+                    response.put("characterId", characterId);
+                    response.put("updated", true);
+                    response.put("message", "角色信息已更新");
+                    return ResponseEntity.ok(response);
+                })
+                .orElseGet(() -> scriptNotFound(id));
     }
 
     // ── Paragraph CRUD: insert / update / delete / reorder actions & dialogues ──
