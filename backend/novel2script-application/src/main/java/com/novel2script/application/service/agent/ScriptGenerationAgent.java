@@ -270,43 +270,19 @@ public class ScriptGenerationAgent {
     private Script buildScript(Map<String, Object> data, Long scriptId) {
         String title = (String) data.getOrDefault("title", "未命名剧本");
 
-        // Build characters
+        // Build characters — may be at top level OR nested inside scenes
         AtomicLong charIdSeq = new AtomicLong(scriptId * 1000);
-        List<Character> characters = new ArrayList<>();
+        Map<String, Character> charNameMap = new LinkedHashMap<>();
+
         List<Map<String, Object>> charList = (List<Map<String, Object>>) data.get("characters");
         if (charList != null) {
             for (Map<String, Object> cd : charList) {
-                Character c = new Character();
-                c.setId(charIdSeq.getAndIncrement());
-                c.setScriptId(scriptId);
-                c.setCanonicalName((String) cd.getOrDefault("canonicalName", "未知"));
-                c.setRoleType(parseRoleType((String) cd.get("roleType")));
-                c.setGender((String) cd.getOrDefault("gender", "未知"));
-                c.setDescription((String) cd.getOrDefault("description", ""));
-                c.setPersonality((List<String>) cd.getOrDefault("personality", List.of("未知")));
-                c.setAliases(new ArrayList<>());
-                c.setResolved(true);
-                c.setCreatedAt(LocalDateTime.now());
-
-                // Parse relationships
-                List<Map<String, Object>> rels = (List<Map<String, Object>>) cd.get("relationships");
-                if (rels != null && !rels.isEmpty()) {
-                    List<Character.Relationship> relationships = new ArrayList<>();
-                    for (Map<String, Object> r : rels) {
-                        Character.Relationship rel = new Character.Relationship();
-                        rel.setTarget((String) r.get("target"));
-                        rel.setRelation((String) r.get("relation"));
-                        relationships.add(rel);
-                    }
-                    c.setRelationships(relationships);
-                } else {
-                    c.setRelationships(new ArrayList<>());
-                }
-                characters.add(c);
+                Character c = parseCharacter(cd, charIdSeq.getAndIncrement(), scriptId);
+                charNameMap.put(c.getCanonicalName(), c);
             }
         }
 
-        // Build scenes with dialogues and actions
+        // Build scenes
         AtomicLong sceneIdSeq = new AtomicLong(scriptId * 1000 + 100);
         AtomicLong dialogueIdSeq = new AtomicLong(1);
         AtomicLong actionIdSeq = new AtomicLong(10000);
@@ -315,26 +291,60 @@ public class ScriptGenerationAgent {
 
         List<Map<String, Object>> sceneList = (List<Map<String, Object>>) data.get("scenes");
         if (sceneList != null) {
+            log.info("ScriptGenerationAgent: found {} scenes in response", sceneList.size());
             for (Map<String, Object> sd : sceneList) {
                 Scene scene = new Scene();
                 scene.setId(sceneIdSeq.getAndIncrement());
                 scene.setScriptId(scriptId);
-                scene.setSceneNumber(getInt(sd, "sceneNumber", scenes.size() + 1));
+
+                // ── Flexible scene number: sceneNumber / scene_id / id / index ──
+                int sceneNum = scenes.size() + 1;
+                if (sd.containsKey("sceneNumber")) sceneNum = getInt(sd, "sceneNumber", sceneNum);
+                else if (sd.containsKey("scene_id")) {
+                    String sid = String.valueOf(sd.get("scene_id"));
+                    sceneNum = sid.replaceAll("[^0-9]", "").isEmpty()
+                            ? sceneNum : Integer.parseInt(sid.replaceAll("[^0-9]", ""));
+                } else if (sd.containsKey("id")) sceneNum = getInt(sd, "id", sceneNum);
+                else if (sd.containsKey("index")) sceneNum = getInt(sd, "index", sceneNum);
+                scene.setSceneNumber(sceneNum);
+
                 scene.setLocation((String) sd.getOrDefault("location", "未知地点"));
                 scene.setTimeOfDay(parseTimeOfDay((String) sd.get("timeOfDay")));
                 scene.setInterior(getBoolean(sd, "interior", true));
-                scene.setTitle((String) sd.getOrDefault("title", "场景" + scene.getSceneNumber()));
-                scene.setSummary((String) sd.getOrDefault("summary",
-                        (String) sd.getOrDefault("title", "")));
+                scene.setTitle((String) sd.getOrDefault("title", "场景" + sceneNum));
+
+                // ── Flexible summary: summary / narration / description / content ──
+                String summary = (String) sd.get("summary");
+                if (summary == null) summary = (String) sd.get("narration");
+                if (summary == null) summary = (String) sd.get("description");
+                if (summary == null) summary = (String) sd.get("content");
+                if (summary == null) summary = (String) sd.getOrDefault("title", "");
+                scene.setSummary(summary);
+
                 scene.setMood((String) sd.getOrDefault("mood", "中性"));
                 scene.setSceneHeading(scene.getSceneHeader());
                 scene.setSourceReason(SourceReason.CHAPTER_BOUNDARY);
                 scene.setChapterIds(new ArrayList<>());
                 scene.setCreatedAt(LocalDateTime.now());
 
-                // Dialogues
+                // ── Per-scene characters (models may nest characters inside scenes) ──
+                List<Map<String, Object>> sceneChars = (List<Map<String, Object>>) sd.get("characters");
+                if (sceneChars != null) {
+                    for (Map<String, Object> sc : sceneChars) {
+                        String name = (String) sc.getOrDefault("name",
+                                sc.getOrDefault("canonicalName", "未知"));
+                        if (!charNameMap.containsKey(name)) {
+                            Character c = parseCharacter(sc, charIdSeq.getAndIncrement(), scriptId);
+                            charNameMap.put(name, c);
+                        }
+                    }
+                }
+
+                // ── Dialogues: dialogues / lines / conversations ──
                 List<Dialogue> dialogues = new ArrayList<>();
                 List<Map<String, Object>> diaList = (List<Map<String, Object>>) sd.get("dialogues");
+                if (diaList == null) diaList = (List<Map<String, Object>>) sd.get("lines");
+                if (diaList == null) diaList = (List<Map<String, Object>>) sd.get("conversations");
                 if (diaList != null) {
                     for (int di = 0; di < diaList.size(); di++) {
                         Map<String, Object> dd = diaList.get(di);
@@ -342,14 +352,17 @@ public class ScriptGenerationAgent {
                         d.setId(dialogueIdSeq.getAndIncrement());
                         d.setSceneId(scene.getId());
                         d.setSequence(di + 1);
-                        d.setSpeaker((String) dd.getOrDefault("speaker", "未知"));
-                        d.setContent((String) dd.getOrDefault("content", ""));
+                        d.setSpeaker((String) dd.getOrDefault("speaker",
+                                dd.getOrDefault("character", "未知")));
+                        d.setContent((String) dd.getOrDefault("content",
+                                dd.getOrDefault("line", "")));
                         d.setEmotion(parseEmotion((String) dd.get("emotion")));
                         d.setCreatedAt(LocalDateTime.now());
 
                         // Map speaker name to character ID
-                        for (Character c : characters) {
-                            if (d.getSpeaker().equals(c.getCanonicalName())) {
+                        for (Character c : charNameMap.values()) {
+                            if (d.getSpeaker().equals(c.getCanonicalName())
+                                    || (c.getAliases() != null && c.getAliases().contains(d.getSpeaker()))) {
                                 d.setCharacterId(c.getId());
                                 break;
                             }
@@ -360,7 +373,7 @@ public class ScriptGenerationAgent {
                 }
                 scene.setDialogues(dialogues);
 
-                // Actions
+                // ── Actions ──
                 List<Action> actions = new ArrayList<>();
                 List<Map<String, Object>> actList = (List<Map<String, Object>>) sd.get("actions");
                 if (actList != null) {
@@ -378,10 +391,9 @@ public class ScriptGenerationAgent {
                 }
                 scene.setActions(actions);
 
-                // Map character names to IDs
+                // Map character names appearing in dialogues to scene character IDs
                 List<Long> charIds = new ArrayList<>();
-                for (Character c : characters) {
-                    // Check if character appears in dialogues or if name appears in scene context
+                for (Character c : charNameMap.values()) {
                     boolean inScene = scene.getDialogues().stream()
                             .anyMatch(d -> c.getCanonicalName().equals(d.getSpeaker()));
                     if (inScene && !charIds.contains(c.getId())) {
@@ -389,10 +401,11 @@ public class ScriptGenerationAgent {
                     }
                 }
                 scene.setCharacterIds(charIds);
-
                 scenes.add(scene);
             }
         }
+
+        List<Character> characters = new ArrayList<>(charNameMap.values());
 
         Script script = new Script();
         script.setId(scriptId);
@@ -407,10 +420,48 @@ public class ScriptGenerationAgent {
         return script;
     }
 
+    /** Parse a single character from a JSON map, handling multiple field name conventions. */
+    private Character parseCharacter(Map<String, Object> cd, long id, Long scriptId) {
+        Character c = new Character();
+        c.setId(id);
+        c.setScriptId(scriptId);
+        // Flexible name: canonicalName / name
+        c.setCanonicalName((String) cd.getOrDefault("canonicalName",
+                cd.getOrDefault("name", "未知")));
+        // Flexible role: roleType / role / type
+        String roleStr = (String) cd.get("roleType");
+        if (roleStr == null) roleStr = (String) cd.get("role");
+        if (roleStr == null) roleStr = (String) cd.get("type");
+        c.setRoleType(parseRoleType(roleStr));
+        c.setGender((String) cd.getOrDefault("gender", "未知"));
+        c.setDescription((String) cd.getOrDefault("description", ""));
+        c.setPersonality((List<String>) cd.getOrDefault("personality", List.of("未知")));
+        c.setAliases(new ArrayList<>());
+        c.setResolved(true);
+        c.setCreatedAt(LocalDateTime.now());
+
+        // Parse relationships
+        List<Map<String, Object>> rels = (List<Map<String, Object>>) cd.get("relationships");
+        if (rels != null && !rels.isEmpty()) {
+            List<Character.Relationship> relationships = new ArrayList<>();
+            for (Map<String, Object> r : rels) {
+                Character.Relationship rel = new Character.Relationship();
+                rel.setTarget((String) r.get("target"));
+                rel.setRelation((String) r.get("relation"));
+                relationships.add(rel);
+            }
+            c.setRelationships(relationships);
+        } else {
+            c.setRelationships(new ArrayList<>());
+        }
+        return c;
+    }
+
     private CharacterRoleType parseRoleType(String s) {
         if (s == null) return CharacterRoleType.SUPPORTING;
         return switch (s.toUpperCase()) {
             case "PROTAGONIST" -> CharacterRoleType.PROTAGONIST;
+            case "DEUTERAGONIST" -> CharacterRoleType.DEUTERAGONIST;
             case "ANTAGONIST" -> CharacterRoleType.ANTAGONIST;
             case "EXTRAS", "MINOR" -> CharacterRoleType.MINOR;
             default -> CharacterRoleType.SUPPORTING;

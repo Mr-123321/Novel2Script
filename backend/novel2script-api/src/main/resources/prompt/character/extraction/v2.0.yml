@@ -91,7 +91,7 @@ output_schema:
       properties:
         name: { type: string }
         aliases: { type: array, items: { type: string } }
-        role_type: { type: string, enum: [PROTAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
+        role_type: { type: string, enum: [PROTAGONIST, DEUTERAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
         gender: { type: string }
         age_range: { type: string }
         personality: { type: array, items: { type: string } }
@@ -111,7 +111,7 @@ validation:
       rule: notBlank
     - field: characters[].role_type
       rule: enum_match
-      param: "PROTAGONIST,ANTAGONIST,SUPPORTING,MINOR"
+      param: "PROTAGONIST,DEUTERAGONIST,ANTAGONIST,SUPPORTING,MINOR"
   retry:
     max_retries: 3
     on_validation_failure: true

@@ -33,7 +33,7 @@ output_schema:
       properties:
         name: { type: string }
         aliases: { type: array, items: { type: string } }
-        role_type: { type: string, enum: [PROTAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
+        role_type: { type: string, enum: [PROTAGONIST, DEUTERAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
         description: { type: string }
       required: [name, role_type, description]
 

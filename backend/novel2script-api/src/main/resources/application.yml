@@ -104,6 +104,15 @@ novel2script:
       ttl-minutes: 60
       max-size: 500
 
+# 剧本生成配置
+script:
+  generation:
+    single-pass:
+      # 是否启用单次 AI 调用生成完整剧本
+      # false = 跳过（直接使用多步流水线），避免浪费 ~90s 等待必然失败的调用
+      # true  = 先尝试单次生成，失败后回退多步流水线
+      enabled: false
+
 server:
   port: 8080
 

@@ -63,6 +63,9 @@ public class SseEmitterUtils {
      * Send an object using a pre-configured {@link SseEmitter.SseEventBuilder}.
      * The data object is serialized to JSON before being passed to the builder.
      *
+     * <p>IOException (client disconnect) is logged at DEBUG level —
+     * it's normal lifecycle, not an application error.
+     *
      * @param emitter      the SSE emitter
      * @param eventBuilder the event builder (without .data() called yet)
      * @param data         any Serializable object
@@ -75,9 +78,11 @@ public class SseEmitterUtils {
         }
         try {
             emitter.send(eventBuilder.data(json));
+        } catch (java.io.IOException e) {
+            // Client disconnected — normal SSE lifecycle, not an error
+            log.debug("SseEmitterUtils: client disconnected during send — {}", e.getMessage());
         } catch (Exception e) {
-            log.error("SseEmitterUtils: send failed for event '{}': {}",
-                    eventBuilder, e.getMessage());
+            log.warn("SseEmitterUtils: send failed unexpectedly: {}", e.getMessage());
         }
     }
 
@@ -88,8 +93,10 @@ public class SseEmitterUtils {
     public void sendRaw(SseEmitter emitter, SseEmitter.SseEventBuilder eventBuilder, String rawData) {
         try {
             emitter.send(eventBuilder.data(rawData));
+        } catch (java.io.IOException e) {
+            log.debug("SseEmitterUtils: client disconnected during raw send — {}", e.getMessage());
         } catch (Exception e) {
-            log.error("SseEmitterUtils: raw send failed: {}", e.getMessage());
+            log.warn("SseEmitterUtils: raw send failed unexpectedly: {}", e.getMessage());
         }
     }
 
