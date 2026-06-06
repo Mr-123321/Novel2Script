@@ -158,6 +158,68 @@ export function updateCharacter(
   });
 }
 
+// ==================== Paragraph CRUD ====================
+
+/** Delete an action paragraph */
+export function deleteAction(
+  scriptId: number,
+  sceneId: number,
+  actionId: number
+): Promise<{ message: string }> {
+  return request(`/scripts/${scriptId}/scenes/${sceneId}/actions/${actionId}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Delete a dialogue paragraph */
+export function deleteDialogueParagraph(
+  scriptId: number,
+  sceneId: number,
+  dialogueId: number
+): Promise<{ message: string }> {
+  return request(
+    `/scripts/${scriptId}/scenes/${sceneId}/dialogues/${dialogueId}`,
+    { method: 'DELETE' }
+  );
+}
+
+/** Insert a new action paragraph */
+export function addAction(
+  scriptId: number,
+  sceneId: number,
+  data: {
+    description: string;
+    actionType?: string;
+    sequence?: number;
+    characterId?: number;
+    durationMs?: number;
+  }
+): Promise<{ id: number; message: string }> {
+  return request(`/scripts/${scriptId}/scenes/${sceneId}/actions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/** Insert a new dialogue paragraph */
+export function addDialogue(
+  scriptId: number,
+  sceneId: number,
+  data: {
+    speaker: string;
+    content: string;
+    emotion?: string;
+    sequence?: number;
+    characterId?: number;
+    parenthetical?: string;
+  }
+): Promise<{ id: number; message: string }> {
+  return request(`/scripts/${scriptId}/scenes/${sceneId}/dialogues`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 // ==================== SSE ====================
 
 /**

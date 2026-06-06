@@ -1,13 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useScriptStore } from '@/stores/script-store';
 import { cn } from '@/lib/utils';
-import { Pencil, Check, X, Move } from 'lucide-react';
+import { Pencil, Check, X, GripVertical } from 'lucide-react';
+import { toast } from '@/stores/toast-store';
 import type { Action } from '@/types/script';
 
 interface ActionBlockProps {
   action: Action;
+  /** External edit control — when true, enter edit mode */
+  editing?: boolean;
+  /** Called when edit mode changes (save/cancel) */
+  onEditStateChange?: (editing: boolean) => void;
 }
 
 const actionTypeLabel = (type: string): string => {
@@ -20,28 +25,66 @@ const actionTypeLabel = (type: string): string => {
   return labels[type] ?? type;
 };
 
-export function ActionBlock({ action }: ActionBlockProps) {
-  const { updateDialogue, script } = useScriptStore();
-  const [editing, setEditing] = useState(false);
+export function ActionBlock({ action, editing: externalEditing, onEditStateChange }: ActionBlockProps) {
+  const script = useScriptStore((s) => s.script);
+  const updateScene = useScriptStore((s) => s.updateScene);
+
+  const [internalEditing, setInternalEditing] = useState(false);
   const [description, setDescription] = useState(action.description);
+  const [durationMs, setDurationMs] = useState(action.durationMs?.toString() ?? '');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isEditing = externalEditing !== undefined ? externalEditing : internalEditing;
+
+  // Sync external editing state
+  useEffect(() => {
+    if (externalEditing) {
+      setDescription(action.description);
+      setDurationMs(action.durationMs?.toString() ?? '');
+    }
+  }, [externalEditing, action.description, action.durationMs]);
+
+  // Focus textarea when entering edit mode
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+  }, [isEditing]);
 
   const handleSave = () => {
-    // Actions live inside scenes alongside dialogues
-    const scene = script?.scenes.find((s) => s.id === action.sceneId);
-    if (scene) {
-      const updatedActions = scene.actions.map((a) =>
-        a.id === action.id ? { ...a, description } : a
-      );
-      useScriptStore.getState().updateScene(action.sceneId, {
-        actions: updatedActions as unknown as typeof scene.actions,
-      } as Partial<typeof scene>);
+    const trimmed = description.trim();
+    if (!trimmed) {
+      toast.warning('请填写动作内容');
+      return;
     }
-    setEditing(false);
+
+    const scene = script?.scenes.find((s) => s.id === action.sceneId);
+    if (!scene) return;
+
+    const updatedActions = scene.actions.map((a) =>
+      a.id === action.id
+        ? {
+            ...a,
+            description: trimmed,
+            durationMs: durationMs ? parseInt(durationMs, 10) || undefined : undefined,
+          }
+        : a
+    );
+    updateScene(action.sceneId, {
+      actions: updatedActions as unknown as typeof scene.actions,
+    } as Partial<typeof scene>);
+
+    setInternalEditing(false);
+    onEditStateChange?.(false);
+    toast.success('💾 段落已更新');
   };
 
   const handleCancel = () => {
     setDescription(action.description);
-    setEditing(false);
+    setDurationMs(action.durationMs?.toString() ?? '');
+    setInternalEditing(false);
+    onEditStateChange?.(false);
   };
 
   return (
@@ -51,64 +94,81 @@ export function ActionBlock({ action }: ActionBlockProps) {
         'hover:bg-white/[0.02]'
       )}
     >
-      <div className="flex items-start gap-2">
-        {/* Action type tag */}
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground/70 bg-white/5 rounded px-1.5 py-0.5 shrink-0 uppercase tracking-wider">
-          <Move className="h-2.5 w-2.5" />
-          {actionTypeLabel(action.actionType)}
-        </span>
-
-        {editing ? (
-          <div className="flex-1 flex items-start gap-1.5">
-            <textarea
-              className="flex-1 bg-white/10 border border-white/10 rounded px-2 py-1 text-sm focus:outline-none focus:border-teal-500/40 resize-none min-h-[2rem]"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              autoFocus
-              rows={2}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.ctrlKey) handleSave();
-                if (e.key === 'Escape') handleCancel();
-              }}
-            />
-            <div className="flex items-center gap-0.5 shrink-0">
-              <button
-                onClick={handleSave}
-                className="p-0.5 rounded hover:bg-teal-500/20 text-teal-400"
-                title="保存 (Ctrl+Enter)"
-              >
-                <Check className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={handleCancel}
-                className="p-0.5 rounded hover:bg-red-500/20 text-red-400"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <span className="text-muted-foreground/70 italic flex-1">
-              {action.description}
+      {isEditing ? (
+        /* ── Edit Mode ── */
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground/70 bg-white/5 rounded px-1.5 py-0.5 uppercase tracking-wider">
+              {actionTypeLabel(action.actionType)}
             </span>
-            <button
-              onClick={() => setEditing(true)}
-              className="opacity-0 group-hover/action:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground shrink-0"
-              title="编辑动作"
-            >
-              <Pencil className="h-3 w-3" />
-            </button>
-          </>
-        )}
-      </div>
+            <span className="text-teal-400/60">编辑模式</span>
+          </div>
 
-      {/* Duration indicator */}
-      {action.durationMs && (
-        <div className="ml-[4.5rem] mt-0.5">
-          <span className="text-[10px] text-muted-foreground/40">
-            ~{(action.durationMs / 1000).toFixed(1)}s
+          <textarea
+            ref={textareaRef}
+            className="w-full bg-white/10 border border-teal-500/30 rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-teal-500/50 resize-y min-h-[60px]"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            placeholder="输入动作描述..."
+            onKeyDown={(e) => {
+              if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+                e.preventDefault();
+                handleSave();
+              }
+              if (e.key === 'Escape') handleCancel();
+            }}
+          />
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>时长 (ms)</span>
+              <input
+                className="w-20 bg-white/5 border border-white/10 rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-teal-500/40"
+                value={durationMs}
+                onChange={(e) => setDurationMs(e.target.value)}
+                placeholder="auto"
+              />
+            </label>
+            <span className="flex-1" />
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md hover:bg-white/10 text-muted-foreground transition-colors"
+            >
+              <X className="h-3 w-3" />
+              取消
+            </button>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 transition-colors"
+            >
+              <Check className="h-3 w-3" />
+              保存
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground/40">
+            Ctrl+Enter 保存 · Esc 取消
+          </p>
+        </div>
+      ) : (
+        /* ── View Mode ── */
+        <div className="flex items-start gap-2">
+          {/* Action type tag */}
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground/70 bg-white/5 rounded px-1.5 py-0.5 shrink-0 uppercase tracking-wider select-none">
+            <GripVertical className="h-2.5 w-2.5" />
+            {actionTypeLabel(action.actionType)}
           </span>
+
+          <span className="text-muted-foreground/70 italic flex-1">
+            {action.description}
+          </span>
+
+          {/* Duration indicator */}
+          {action.durationMs && (
+            <span className="text-[10px] text-muted-foreground/40 shrink-0">
+              ~{(action.durationMs / 1000).toFixed(1)}s
+            </span>
+          )}
         </div>
       )}
     </div>

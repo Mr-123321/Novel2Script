@@ -567,6 +567,8 @@ public class DialogueAgent {
             String speaker = m.group(1).trim();
             String content = m.groupCount() >= 2 && m.group(2) != null ? m.group(2).trim() : "";
             if (content.isEmpty()) continue;
+            // Skip if speaker name is clearly noise (e.g., action description)
+            if (speaker.length() > 4 || CharacterNameFilter.isNoiseQuick(speaker)) continue;
             Long characterId = resolveSpeakerId(speaker, characters, seq);
             dialogues.add(Dialogue.builder()
                     .sceneId(scene.getId()).characterId(characterId)
@@ -687,18 +689,82 @@ public class DialogueAgent {
         return dialogues;
     }
 
-    /** Resolve a speaker name to a character ID from the present characters list. */
+    // ── Speaker name resolution ─────────────────────────
+
+    /** Common honorific/kinship suffixes that can be stripped to reveal the base name */
+    private static final Set<String> HONORIFIC_SUFFIXES = Set.of(
+            "哥哥", "姐姐", "叔叔", "阿姨", "伯伯", "婶婶", "嫂子",
+            "师傅", "师父", "老师", "师兄", "师姐", "师弟", "师妹",
+            "先生", "女士", "小姐", "少爷", "夫人", "老爷", "老太太",
+            "大人", "前辈", "长老", "掌门", "宗主", "门主", "帮主",
+            "兄", "哥", "姐", "妹", "叔", "姨", "伯", "婶", "嫂", "爷", "奶"
+    );
+
+    /** Resolve a speaker name to a character ID from the present characters list.
+     * Handles honorific suffixes (e.g. "萧炎哥哥" → "萧炎"),
+     * alias matching, and noise filtering. */
     private Long resolveSpeakerId(String speakerName, List<Character> characters, int fallbackIndex) {
         if (characters == null || characters.isEmpty()) return null;
+        if (speakerName == null || speakerName.isBlank()) return null;
+
+        // 1. Quick exact match on canonical name
         for (Character c : characters) {
-            if (c.getCanonicalName() != null && c.getCanonicalName().contains(speakerName)) {
-                return c.getId();
-            }
-            if (speakerName.contains(c.getCanonicalName())) {
-                return c.getId();
+            if (speakerName.equals(c.getCanonicalName())) return c.getId();
+            if (c.getAliases() != null && c.getAliases().contains(speakerName)) return c.getId();
+        }
+
+        // 2. Strip honorific suffixes and try again
+        String baseName = stripHonorific(speakerName);
+        if (!baseName.equals(speakerName)) {
+            for (Character c : characters) {
+                if (baseName.equals(c.getCanonicalName())) return c.getId();
+                if (c.getAliases() != null && c.getAliases().contains(baseName)) return c.getId();
             }
         }
-        return characters.get(fallbackIndex % characters.size()).getId();
+
+        // 3. Prefix stripping (小X, 老X, 阿X) — try with/without prefix
+        String unprefixed = stripPrefix(speakerName);
+        if (!unprefixed.equals(speakerName)) {
+            for (Character c : characters) {
+                if (c.getCanonicalName() != null && c.getCanonicalName().contains(unprefixed)) return c.getId();
+                if (unprefixed.contains(c.getCanonicalName())) return c.getId();
+            }
+        }
+
+        // 4. Contains match (bidirectional, but only if speakerName ≥2 chars to avoid false positives)
+        if (speakerName.length() >= 2) {
+            for (Character c : characters) {
+                if (c.getCanonicalName() != null && c.getCanonicalName().length() >= 2) {
+                    if (c.getCanonicalName().contains(speakerName)) return c.getId();
+                    if (speakerName.contains(c.getCanonicalName())) return c.getId();
+                }
+            }
+        }
+
+        // 5. Fallback: return null instead of randomly assigning
+        //    (was: characters.get(fallbackIndex % characters.size()).getId())
+        return null;
+    }
+
+    /** Strip common honorific suffixes e.g. "萧炎哥哥" → "萧炎" */
+    static String stripHonorific(String name) {
+        if (name == null || name.length() < 2) return name;
+        for (String suffix : HONORIFIC_SUFFIXES) {
+            if (name.length() > suffix.length() && name.endsWith(suffix)) {
+                return name.substring(0, name.length() - suffix.length());
+            }
+        }
+        return name;
+    }
+
+    /** Strip common name prefixes e.g. "小川" → "川" */
+    private static String stripPrefix(String name) {
+        if (name == null || name.length() < 2) return name;
+        char first = name.charAt(0);
+        if (first == '小' || first == '老' || first == '阿' || first == '大') {
+            return name.substring(1);
+        }
+        return name;
     }
 
     /**

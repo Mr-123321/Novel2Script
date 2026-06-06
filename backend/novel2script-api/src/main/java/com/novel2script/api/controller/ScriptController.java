@@ -3,9 +3,14 @@ package com.novel2script.api.controller;
 import com.novel2script.api.util.SseEmitterUtils;
 import com.novel2script.application.service.NovelService;
 import com.novel2script.application.service.ScriptService;
+import com.novel2script.common.enums.Emotion;
 import com.novel2script.common.enums.WorkflowStep;
 import com.novel2script.domain.dto.GenerationProgress;
 import com.novel2script.domain.dto.ScriptGenerateRequest;
+import com.novel2script.domain.model.Action;
+import com.novel2script.domain.model.Dialogue;
+import com.novel2script.domain.model.PlotInsertion;
+import com.novel2script.domain.model.Scene;
 import com.novel2script.domain.model.Script;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -268,5 +273,343 @@ public class ScriptController {
         response.put("updated", true);
         response.put("message", "角色更新已接收（功能开发中）");
         return ResponseEntity.ok(response);
+    }
+
+    // ── Paragraph CRUD: insert / update / delete / reorder actions & dialogues ──
+
+    @PostMapping("/{id}/scenes/{sceneId}/actions")
+    @Operation(summary = "向场景中插入一个动作段落")
+    public ResponseEntity<Object> addAction(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @RequestBody Map<String, Object> body) {
+        String description = (String) body.get("description");
+        if (description == null || description.isBlank()) {
+            return badRequest("description 字段不能为空");
+        }
+
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    String actionType = body.get("actionType") instanceof String s
+                            ? s : "ACTION";
+                    int sequence = body.get("sequence") instanceof Number n
+                            ? n.intValue() : 999;
+                    Long characterId = body.get("characterId") instanceof Number n
+                            ? n.longValue() : null;
+                    Integer durationMs = body.get("durationMs") instanceof Number n
+                            ? n.intValue() : null;
+
+                    Action action = Action.builder()
+                            .id(System.currentTimeMillis())
+                            .sceneId(sceneId)
+                            .characterId(characterId)
+                            .sequence(sequence)
+                            .actionType(actionType)
+                            .description(description.trim())
+                            .durationMs(durationMs)
+                            .build();
+
+                    try {
+                        scriptService.addAction(id, sceneId, action);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("id", action.getId());
+                    resp.put("message", "动作段落已插入");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @PutMapping("/{id}/scenes/{sceneId}/actions/{actionId}")
+    @Operation(summary = "更新场景中的动作段落")
+    public ResponseEntity<Object> updateAction(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @PathVariable Long actionId,
+            @RequestBody Map<String, Object> body) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    try {
+                        scriptService.updateAction(id, sceneId, actionId, body);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "动作段落已更新");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @DeleteMapping("/{id}/scenes/{sceneId}/actions/{actionId}")
+    @Operation(summary = "删除场景中的动作段落")
+    public ResponseEntity<Object> deleteAction(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @PathVariable Long actionId) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    try {
+                        scriptService.deleteAction(id, sceneId, actionId);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "动作段落已删除");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @PostMapping("/{id}/scenes/{sceneId}/dialogues")
+    @Operation(summary = "向场景中插入一个对白段落")
+    public ResponseEntity<Object> addDialogue(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @RequestBody Map<String, Object> body) {
+        String content = (String) body.get("content");
+        String speaker = (String) body.get("speaker");
+        if (content == null || content.isBlank()) {
+            return badRequest("content 字段不能为空");
+        }
+        if (speaker == null || speaker.isBlank()) {
+            return badRequest("speaker 字段不能为空");
+        }
+
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    int sequence = body.get("sequence") instanceof Number n
+                            ? n.intValue() : 999;
+                    Long characterId = body.get("characterId") instanceof Number n
+                            ? n.longValue() : 0L;
+                    String emotion = body.get("emotion") instanceof String s
+                            ? s : "NEUTRAL";
+                    String parenthetical = body.get("parenthetical") instanceof String s
+                            ? s : null;
+
+                    Dialogue dialogue = Dialogue.builder()
+                            .id(System.currentTimeMillis())
+                            .sceneId(sceneId)
+                            .characterId(characterId)
+                            .sequence(sequence)
+                            .speaker(speaker.trim())
+                            .emotion(Emotion.fromLabel(emotion))
+                            .content(content.trim())
+                            .parenthetical(parenthetical)
+                            .build();
+
+                    try {
+                        scriptService.addDialogue(id, sceneId, dialogue);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("id", dialogue.getId());
+                    resp.put("message", "对白段落已插入");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @PutMapping("/{id}/scenes/{sceneId}/dialogues/{dialogueId}")
+    @Operation(summary = "更新场景中的对白段落")
+    public ResponseEntity<Object> updateDialogueParagraph(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @PathVariable Long dialogueId,
+            @RequestBody Map<String, Object> body) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    try {
+                        scriptService.updateDialogue(id, sceneId, dialogueId, body);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "对白段落已更新");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @DeleteMapping("/{id}/scenes/{sceneId}/dialogues/{dialogueId}")
+    @Operation(summary = "删除场景中的对白段落")
+    public ResponseEntity<Object> deleteDialogue(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @PathVariable Long dialogueId) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    try {
+                        scriptService.deleteDialogue(id, sceneId, dialogueId);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "对白段落已删除");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    @PutMapping("/{id}/scenes/{sceneId}/reorder")
+    @Operation(summary = "重新排列场景中所有段落的顺序")
+    public ResponseEntity<Object> reorderContent(
+            @PathVariable Long id,
+            @PathVariable Long sceneId,
+            @RequestBody Map<String, Object> body) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> items = (List<Map<String, Object>>) body.get("items");
+                    if (items == null || items.isEmpty()) {
+                        return badRequest("items 字段不能为空");
+                    }
+                    try {
+                        scriptService.reorderSceneContent(id, sceneId, items);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, Object> err = new LinkedHashMap<>();
+                        err.put("code", 404);
+                        err.put("message", e.getMessage());
+                        return ResponseEntity.status(404).body(err);
+                    }
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "段落顺序已更新");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> scriptNotFound(id));
+    }
+
+    // ── Helpers ──
+
+    private ResponseEntity<Object> badRequest(String message) {
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("code", 400);
+        err.put("message", message);
+        return ResponseEntity.badRequest().body(err);
+    }
+
+    private ResponseEntity<Object> scriptNotFound(Long id) {
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("code", 404);
+        err.put("message", "剧本不存在: id=" + id);
+        return ResponseEntity.status(404).body(err);
+    }
+
+    // ── Plot Insertions: user-inserted narrative text between scenes ──
+
+    @GetMapping("/{id}/plot-insertions")
+    @Operation(summary = "获取剧本中所有用户插入的情节文本")
+    public ResponseEntity<Object> getPlotInsertions(@PathVariable Long id) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    List<PlotInsertion> insertions = script.getPlotInsertions();
+                    return ResponseEntity.ok(insertions != null ? insertions : List.of());
+                })
+                .orElseGet(() -> {
+                    Map<String, Object> notFound = new LinkedHashMap<>();
+                    notFound.put("code", 404);
+                    notFound.put("message", "剧本不存在: id=" + id);
+                    return ResponseEntity.status(404).body(notFound);
+                });
+    }
+
+    @PostMapping("/{id}/plot-insertions")
+    @Operation(summary = "手动插入一段情节描述文本到剧本中")
+    public ResponseEntity<Object> addPlotInsertion(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body) {
+        String text = (String) body.get("text");
+        if (text == null || text.isBlank()) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("code", 400);
+            err.put("message", "text 字段不能为空");
+            return ResponseEntity.badRequest().body(err);
+        }
+
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    int position = body.containsKey("position")
+                            ? ((Number) body.get("position")).intValue()
+                            : script.getScenes().size(); // default: after last scene
+
+                    PlotInsertion insertion = PlotInsertion.builder()
+                            .id(System.currentTimeMillis()) // simple unique ID
+                            .scriptId(id)
+                            .text(text.trim())
+                            .position(Math.max(0, position))
+                            .insertedBy("user")
+                            .createdAt(java.time.LocalDateTime.now())
+                            .updatedAt(java.time.LocalDateTime.now())
+                            .build();
+
+                    script.getPlotInsertions().add(insertion);
+                    scriptService.save(script);
+                    log.info("Plot insertion added: scriptId={}, position={}, textLen={}",
+                            id, insertion.getPosition(), insertion.getText().length());
+
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("id", insertion.getId());
+                    resp.put("position", insertion.getPosition());
+                    resp.put("message", "情节插入已添加");
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> {
+                    Map<String, Object> notFound = new LinkedHashMap<>();
+                    notFound.put("code", 404);
+                    notFound.put("message", "剧本不存在: id=" + id);
+                    return ResponseEntity.status(404).body(notFound);
+                });
+    }
+
+    @DeleteMapping("/{id}/plot-insertions/{insertionId}")
+    @Operation(summary = "删除指定的情节插入")
+    public ResponseEntity<Object> removePlotInsertion(
+            @PathVariable Long id,
+            @PathVariable Long insertionId) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    boolean removed = script.getPlotInsertions()
+                            .removeIf(pi -> pi.getId().equals(insertionId));
+                    if (removed) {
+                        scriptService.save(script);
+                        log.info("Plot insertion removed: scriptId={}, insertionId={}", id, insertionId);
+                        Map<String, Object> resp = new LinkedHashMap<>();
+                        resp.put("message", "情节插入已删除");
+                        return ResponseEntity.ok(resp);
+                    }
+                    Map<String, Object> notFound = new LinkedHashMap<>();
+                    notFound.put("code", 404);
+                    notFound.put("message", "情节插入不存在: id=" + insertionId);
+                    return ResponseEntity.status(404).body(notFound);
+                })
+                .orElseGet(() -> {
+                    Map<String, Object> notFound = new LinkedHashMap<>();
+                    notFound.put("code", 404);
+                    notFound.put("message", "剧本不存在: id=" + id);
+                    return ResponseEntity.status(404).body(notFound);
+                });
     }
 }
