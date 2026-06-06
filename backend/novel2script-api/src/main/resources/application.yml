@@ -111,7 +111,19 @@ script:
       # 是否启用单次 AI 调用生成完整剧本
       # false = 跳过（直接使用多步流水线），避免浪费 ~90s 等待必然失败的调用
       # true  = 先尝试单次生成，失败后回退多步流水线
-      enabled: false
+      enabled: true
+      # 单次生成专用 max_tokens（覆盖 provider 默认的 4096）
+      # 16384 tokens 足够 5-10 章的剧本大纲（v2.0 简化输出）
+      max-tokens: 16384
+      # 单次生成专用 temperature（比默认 0.7 更低，提高 JSON 格式稳定性）
+      temperature: 0.3
+      # 是否使用分段生成模式（v2.0）：先生成角色+场景大纲，再分段生成对白
+      # true  = 使用 v2.0 分段模式（推荐）
+      # false = 使用 v1.0 完整 JSON 模式（需要更多 tokens）
+      staged: true
+      # 章节内容截断长度（字符），用于减少 prompt 大小
+      # 0 = 不截断（发送全文）
+      chapter-truncate-chars: 2000
 
 server:
   port: 8080
