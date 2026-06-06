@@ -71,6 +71,13 @@ user_template: |
   {{previousSceneSummary}}
   {{/hasPreviousScene}}
 
+  {{#hasPreviousDialogues}}
+  ### 上一场景的最后几句对白（注意保持人物说话风格和情绪连续性）
+  {{#previousDialogues}}
+  - {{speaker}}: "{{content}}"
+  {{/previousDialogues}}
+  {{/hasPreviousDialogues}}
+
   {{#hasSceneEvents}}
   ### 场景中的事件
   {{#sceneEvents}}

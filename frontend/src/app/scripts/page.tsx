@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { listScripts } from '@/lib/api';
+import { listScripts, deleteScript } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Script } from '@/types/script';
@@ -15,6 +15,7 @@ import {
   Loader2,
   Plus,
   ArrowRight,
+  Trash2,
 } from 'lucide-react';
 
 const statusBadgeVariant = (status: string) => {
@@ -49,6 +50,7 @@ export default function ScriptsPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => {
     listScripts()
@@ -56,6 +58,21 @@ export default function ScriptsPage() {
       .catch((err) => setError(err instanceof Error ? err.message : '加载失败'))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleDelete = async (id: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('确定删除此剧本？此操作不可撤销。')) return;
+    setDeleting(id);
+    try {
+      await deleteScript(id);
+      setScripts(scripts.filter((s) => s.id !== id));
+    } catch (err) {
+      alert('删除失败，请重试');
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -185,7 +202,19 @@ export default function ScriptsPage() {
                       </div>
                     )}
                   </div>
-                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-teal-400 group-hover:translate-x-0.5 transition-all shrink-0 ml-3" />
+                  <button
+                    onClick={(e) => handleDelete(script.id, e)}
+                    disabled={deleting === script.id}
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 ml-2"
+                    title="删除剧本"
+                  >
+                    {deleting === script.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-teal-400 group-hover:translate-x-0.5 transition-all shrink-0 ml-1" />
                 </div>
               </Link>
             ))}

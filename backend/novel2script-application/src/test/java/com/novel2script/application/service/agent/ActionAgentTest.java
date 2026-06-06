@@ -41,7 +41,7 @@ class ActionAgentTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         // Agent with null dependencies — individual methods tested in isolation
-        agent = new ActionAgent(null, null, objectMapper);
+        agent = new ActionAgent(null, null, objectMapper, null);
     }
 
     // ──────────────────────────────────────────────────

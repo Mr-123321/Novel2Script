@@ -93,6 +93,11 @@ export function listScripts(): Promise<Script[]> {
   return request<Script[]>('/scripts');
 }
 
+/** Delete a script by ID */
+export function deleteScript(id: number): Promise<{ message: string }> {
+  return request(`/scripts/${id}`, { method: 'DELETE' });
+}
+
 // ==================== Exports (YAML) ====================
 
 /** Get script YAML content — backend at /api/v1/exports/{id}/yaml */

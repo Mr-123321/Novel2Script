@@ -465,25 +465,43 @@ public class GenerationOrchestrator {
             return buildDialoguesMock(scenes, characters);
         }
 
+        // Invalidate dialogue agent's character profile cache for fresh batch
+        dialogueAgent.invalidateProfileCache();
+
         AtomicInteger aiSuccessCount = new AtomicInteger(0);
         AtomicInteger speechFallbackCount = new AtomicInteger(0);
         AtomicInteger mockFallbackCount = new AtomicInteger(0);
+        AtomicInteger totalDialogues = new AtomicInteger(0);
 
         int parallelism = Math.min(scenes.size(), 5);
         ExecutorService pool = Executors.newFixedThreadPool(parallelism);
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        for (Scene scene : scenes) {
+        // Track previous scene's dialogues for narrative continuity
+        final List<Dialogue>[] previousDialogues = new List[1];
+        previousDialogues[0] = null;
+
+        for (int si = 0; si < scenes.size(); si++) {
+            final Scene scene = scenes.get(si);
+            final Scene prevScene = si > 0 ? scenes.get(si - 1) : null;
+            // Capture previous dialogues for continuity (snapshot before parallel mutation)
+            final List<Dialogue> prevDias = previousDialogues[0];
+
             futures.add(CompletableFuture.runAsync(() -> {
                 List<Character> presentChars = resolveCharactersForScene(scene, characters);
                 List<Dialogue> dialogues;
 
-                // Tier 1: AI generation
+                // Tier 1: AI generation (with previous scene's dialogues for continuity)
                 try {
-                    dialogues = dialogueAgent.generate(scene, presentChars, List.of(), null, null);
+                    dialogues = dialogueAgent.generate(scene, presentChars, List.of(),
+                            prevScene, null, prevDias);
                     if (dialogues != null && !dialogues.isEmpty()) {
-                        synchronized (scene) { scene.setDialogues(dialogues); }
+                        synchronized (scene) {
+                            scene.setDialogues(dialogues);
+                            previousDialogues[0] = dialogues; // update for next scene
+                        }
                         aiSuccessCount.incrementAndGet();
+                        totalDialogues.addAndGet(dialogues.size());
                         return;
                     }
                 } catch (Exception e) {
@@ -493,8 +511,12 @@ public class GenerationOrchestrator {
                 // Tier 2: regex extraction
                 dialogues = extractDialoguesFromContext(scene, presentChars);
                 if (!dialogues.isEmpty()) {
-                    synchronized (scene) { scene.setDialogues(dialogues); }
+                    synchronized (scene) {
+                        scene.setDialogues(dialogues);
+                        previousDialogues[0] = dialogues;
+                    }
                     speechFallbackCount.incrementAndGet();
+                    totalDialogues.addAndGet(dialogues.size());
                     return;
                 }
 
@@ -517,13 +539,26 @@ public class GenerationOrchestrator {
             for (Scene scene : scenes) {
                 if (scene.getDialogues() == null || scene.getDialogues().isEmpty()) {
                     List<Character> presentChars = resolveCharactersForScene(scene, characters);
-                    scene.setDialogues(buildMockDialoguesForScene(scene, presentChars));
+                    List<Dialogue> fill = buildMockDialoguesForScene(scene, presentChars);
+                    scene.setDialogues(fill);
+                    totalDialogues.addAndGet(fill.size());
                 }
             }
         }
 
-        log.info("Dialogue generation: AI={}, speech-extract={}, mock={} (parallelism={})",
-                aiSuccessCount.get(), speechFallbackCount.get(), mockFallbackCount.get(), parallelism);
+        // ── Quality metrics logging ──
+        int sceneCount = scenes.size();
+        int aiCount = aiSuccessCount.get();
+        int speechCount = speechFallbackCount.get();
+        int mockCount = mockFallbackCount.get();
+        double aiRatio = sceneCount > 0 ? (double) aiCount / sceneCount * 100.0 : 0;
+        double avgDias = sceneCount > 0 ? (double) totalDialogues.get() / sceneCount : 0;
+
+        log.info("📊 Dialogue quality: {}/{} scenes AI-generated ({:.0f}%), speech-extract={}, mock={}, "
+                + "totalDialogues={}, avgPerScene={:.1f} (parallelism={})",
+                aiCount, sceneCount, aiRatio, speechCount, mockCount,
+                totalDialogues.get(), avgDias, parallelism);
+
         return scenes;
     }
 
