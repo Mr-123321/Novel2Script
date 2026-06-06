@@ -6,11 +6,9 @@ import { useScriptStore } from '@/stores/script-store';
 import { useSSE } from '@/hooks/use-sse';
 import { getScript } from '@/lib/api';
 import { ScriptEditor } from '@/components/script/ScriptEditor';
-import { WorkflowProgress } from '@/components/script/WorkflowProgress';
-import { MermaidWorkflow } from '@/components/script/MermaidWorkflow';
 import type { WorkflowProgress as WorkflowProgressType } from '@/types/script';
 import Link from 'next/link';
-import { FileText, AlertCircle, GitBranch } from 'lucide-react';
+import { FileText, AlertCircle } from 'lucide-react';
 import { useState } from 'react';
 
 export default function ScriptPage() {
@@ -18,7 +16,6 @@ export default function ScriptPage() {
   const scriptId = Number(params.id);
   const { script, setScript, updateProgress, isLoading, setIsLoading } =
     useScriptStore();
-  const [showWorkflow, setShowWorkflow] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
   // Fetch script on mount
@@ -124,24 +121,10 @@ export default function ScriptPage() {
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <button
-              onClick={() => setShowWorkflow(!showWorkflow)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-                showWorkflow
-                  ? 'bg-teal-500/10 text-teal-400'
-                  : 'hover:bg-white/5 hover:text-foreground'
-              }`}
-              title="查看工作流"
-            >
-              <GitBranch className="h-3.5 w-3.5" />
-              工作流
-            </button>
             <span>{script.title}</span>
           </div>
         </div>
       </header>
-
-      <WorkflowProgress progress={script.progress} />
 
       {/* Generation error banner */}
       {generationError && (
@@ -182,13 +165,6 @@ export default function ScriptPage() {
         </div>
       )}
 
-      {showWorkflow && (
-        <div className="border-b border-white/5 bg-white/[0.01] px-6 py-4">
-          <div className="max-w-3xl mx-auto">
-            <MermaidWorkflow scriptId={scriptId} />
-          </div>
-        </div>
-      )}
       <div className="flex-1 overflow-hidden">
         <ScriptEditor scriptId={scriptId} />
       </div>

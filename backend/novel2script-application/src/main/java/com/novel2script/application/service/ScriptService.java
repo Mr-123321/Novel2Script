@@ -204,6 +204,19 @@ public class ScriptService {
         log.warn("Script marked FAILED: id={}", scriptId);
     }
 
+    /**
+     * Delete a script from the in-memory store.
+     * Called by the DELETE /api/v1/scripts/{id} endpoint.
+     */
+    public void deleteScript(Long scriptId) {
+        Script removed = store.remove(scriptId);
+        if (removed != null) {
+            log.info("Script deleted: id={}, title='{}'", scriptId, removed.getTitle());
+        } else {
+            log.warn("Script delete requested for non-existent id={}", scriptId);
+        }
+    }
+
     // ─────────────────────────────────────────────────────
     //  Paragraph CRUD — actions & dialogues
     // ─────────────────────────────────────────────────────

@@ -16,11 +16,15 @@ import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -48,19 +52,24 @@ import java.util.stream.Collectors;
 public class ActionAgent {
 
     private static final String PROMPT_NAME = "action-generation";
+    private static final int ACTION_MAX_TOKENS = 4096;
+    private static final int STREAM_TIMEOUT_SECONDS = 45;
 
     private final AiModelRouter router;
     private final PromptRegistry promptRegistry;
     private final ObjectMapper objectMapper;
+    private final Map<String, ChatClient> streamingChatClients;
     /** Global sequence for assigning unique IDs to parsed actions */
     private final java.util.concurrent.atomic.AtomicLong actionIdSeq = new java.util.concurrent.atomic.AtomicLong(10000);
 
     public ActionAgent(AiModelRouter router,
                        PromptRegistry promptRegistry,
-                       ObjectMapper objectMapper) {
+                       ObjectMapper objectMapper,
+                       Map<String, ChatClient> streamingChatClients) {
         this.router = router;
         this.promptRegistry = promptRegistry;
         this.objectMapper = objectMapper;
+        this.streamingChatClients = streamingChatClients;
     }
 
     // ──────────────────────────────────────────────────
@@ -171,11 +180,7 @@ public class ActionAgent {
                 scene.getTitle(), model);
 
         try {
-            ChatResponse response = model.call(
-                    new Prompt(new org.springframework.ai.chat.messages.UserMessage(prompt)));
-            // Log token usage
-            logTokenUsage(response, prompt);
-            String content = response.getResult().getOutput().getText();
+            String content = callWithStreaming(model, prompt, ACTION_MAX_TOKENS);
             Map<Integer, String> seqToCharName = new HashMap<>();
             List<Action> actions = parseActionsWithNames(content, scene.getId(), seqToCharName);
             return enrichActions(actions, scene, presentCharacters, seqToCharName);
@@ -183,6 +188,62 @@ public class ActionAgent {
             log.error("ActionAgent: AI call failed for scene '{}': {}",
                     scene.getTitle(), e.getMessage());
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Call the AI model with SSE streaming, falling back to blocking.
+     */
+    private String callWithStreaming(ChatModel model, String promptText, int maxTokens) {
+        String provider = TaskType.ACTION_GENERATE.getDefaultProvider();
+        ChatClient streamingClient = streamingChatClients.get(provider);
+
+        if (streamingClient != null) {
+            try {
+                log.debug("ActionAgent: using SSE streaming (maxTokens={})", maxTokens);
+                StringBuilder fullResponse = new StringBuilder();
+
+                var promptBuilder = streamingClient.prompt()
+                        .user(promptText);
+                if (maxTokens > 0) {
+                    promptBuilder.options(OpenAiChatOptions.builder()
+                            .maxTokens(maxTokens).build());
+                }
+
+                Flux<ChatResponse> stream = promptBuilder.stream().chatResponse();
+                List<ChatResponse> chunks = stream.collectList()
+                        .block(Duration.ofSeconds(STREAM_TIMEOUT_SECONDS));
+
+                if (chunks != null && !chunks.isEmpty()) {
+                    for (ChatResponse chunk : chunks) {
+                        if (chunk.getResult() != null
+                                && chunk.getResult().getOutput() != null
+                                && chunk.getResult().getOutput().getText() != null) {
+                            fullResponse.append(chunk.getResult().getOutput().getText());
+                        }
+                    }
+                    String text = fullResponse.toString();
+                    if (!text.isBlank()) {
+                        log.debug("ActionAgent: streaming collected {} chunks → {} chars",
+                                chunks.size(), text.length());
+                        return text;
+                    }
+                }
+                log.debug("ActionAgent: streaming returned empty, falling back to blocking");
+            } catch (Exception e) {
+                log.debug("ActionAgent: streaming failed ({}), falling back to blocking", e.getMessage());
+            }
+        }
+
+        // ── Blocking fallback ──
+        try {
+            ChatResponse response = model.call(
+                    new Prompt(new org.springframework.ai.chat.messages.UserMessage(promptText)));
+            logTokenUsage(response, promptText);
+            return response.getResult().getOutput().getText();
+        } catch (Exception e) {
+            log.error("ActionAgent: blocking call failed: {}", e.getMessage());
+            throw new RuntimeException("Action AI generation failed: " + e.getMessage(), e);
         }
     }
 

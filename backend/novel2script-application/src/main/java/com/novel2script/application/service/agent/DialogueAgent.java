@@ -13,10 +13,14 @@ import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -51,16 +55,25 @@ import java.util.stream.Collectors;
 @Service
 public class DialogueAgent {
 
+    private static final int DIALOGUE_MAX_TOKENS = 8192;
+    private static final int DIALOGUE_STREAM_TIMEOUT_SECONDS = 60;
+
     private final AiModelRouter router;
     private final PromptRegistry promptRegistry;
     private final DialogueConsistencyChecker consistencyChecker;
+    private final Map<String, ChatClient> streamingChatClients;
+    /** Cache of pre-formatted character profiles for the current batch. */
+    private String cachedCharacterProfiles = null;
+    private List<Character> cachedCharacters = null;
 
     public DialogueAgent(AiModelRouter router,
                          PromptRegistry promptRegistry,
-                         DialogueConsistencyChecker consistencyChecker) {
+                         DialogueConsistencyChecker consistencyChecker,
+                         Map<String, ChatClient> streamingChatClients) {
         this.router = router;
         this.promptRegistry = promptRegistry;
         this.consistencyChecker = consistencyChecker;
+        this.streamingChatClients = streamingChatClients;
     }
 
     // ── Public API ──────────────────────────────────────
@@ -81,6 +94,21 @@ public class DialogueAgent {
                                    List<PlotEvent> sceneEvents,
                                    Scene previousScene,
                                    Map<Long, String> characterEmotions) {
+        return generate(scene, presentCharacters, sceneEvents, previousScene,
+                characterEmotions, null);
+    }
+
+    /**
+     * Generate dialogue with previous scene's actual dialogues for narrative continuity.
+     *
+     * @param previousDialogues the last N dialogues from the previous scene (or null)
+     */
+    public List<Dialogue> generate(Scene scene,
+                                   List<Character> presentCharacters,
+                                   List<PlotEvent> sceneEvents,
+                                   Scene previousScene,
+                                   Map<Long, String> characterEmotions,
+                                   List<Dialogue> previousDialogues) {
         if (scene == null || presentCharacters == null || presentCharacters.isEmpty()) {
             log.warn("DialogueAgent: scene or characters missing");
             return List.of();
@@ -92,19 +120,16 @@ public class DialogueAgent {
                 scene.getTitle(), presentCharacters.size(), model);
 
         org.springframework.ai.chat.prompt.Prompt fullPrompt = buildPrompt(
-                scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
-        ChatResponse response = model.call(fullPrompt);
-
-        // Log token usage
-        logTokenUsage(response, fullPrompt.getContents().toString(), "dialogue-generation");
+                scene, presentCharacters, sceneEvents, previousScene, characterEmotions, previousDialogues);
+        // Use streaming with token override for reliability
+        String rawText = callWithStreaming(model, fullPrompt, DIALOGUE_MAX_TOKENS);
 
         // ── Log raw response for diagnosis (first 500 chars) ──
-        String rawText = response.getResult().getOutput().getText();
         log.debug("DialogueAgent raw response for '{}' ({} chars, first 500):\n{}",
                 scene.getTitle(), rawText.length(),
                 rawText.length() > 500 ? rawText.substring(0, 500) + "…" : rawText);
 
-        List<Dialogue> dialogues = parseResponse(response, scene, presentCharacters);
+        List<Dialogue> dialogues = parseResponseFromText(rawText, scene, presentCharacters);
 
         // Run consistency check
         List<ConsistencyIssue> issues = consistencyChecker.check(dialogues, presentCharacters);
@@ -225,18 +250,19 @@ public class DialogueAgent {
                                List<Character> presentCharacters,
                                List<PlotEvent> sceneEvents,
                                Scene previousScene,
-                               Map<Long, String> characterEmotions) {
+                               Map<Long, String> characterEmotions,
+                               List<Dialogue> previousDialogues) {
         // Try registered template first — use render() to include system
         // message, few-shot examples, and output schema instructions
         PromptTemplate template = promptRegistry.getLatest("dialogue-generation");
         if (template != null) {
             Map<String, Object> vars = buildTemplateVariables(
-                    scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
+                    scene, presentCharacters, sceneEvents, previousScene, characterEmotions, previousDialogues);
             return template.render(vars);
         }
         // Fallback: inline prompt without template
         String userContent = buildInlinePrompt(
-                scene, presentCharacters, sceneEvents, previousScene, characterEmotions);
+                scene, presentCharacters, sceneEvents, previousScene, characterEmotions, previousDialogues);
         return new org.springframework.ai.chat.prompt.Prompt(
                 new org.springframework.ai.chat.messages.UserMessage(userContent));
     }
@@ -245,7 +271,8 @@ public class DialogueAgent {
                                                         List<Character> presentCharacters,
                                                         List<PlotEvent> sceneEvents,
                                                         Scene previousScene,
-                                                        Map<Long, String> characterEmotions) {
+                                                        Map<Long, String> characterEmotions,
+                                                        List<Dialogue> previousDialogues) {
         Map<String, Object> vars = new HashMap<>();
         vars.put("sceneTitle", scene.getTitle());
         vars.put("location", scene.getLocation() != null ? scene.getLocation() : "未知");
@@ -314,14 +341,54 @@ public class DialogueAgent {
             vars.put("hasPreviousScene", false);
         }
 
+        // Previous scene's actual dialogues for narrative continuity
+        if (previousDialogues != null && !previousDialogues.isEmpty()) {
+            List<Map<String, String>> prevDias = new ArrayList<>();
+            int maxPrev = Math.min(previousDialogues.size(), 3); // last 3 dialogues
+            for (int i = previousDialogues.size() - maxPrev; i < previousDialogues.size(); i++) {
+                Dialogue d = previousDialogues.get(i);
+                Map<String, String> dm = new HashMap<>();
+                dm.put("speaker", d.getSpeaker() != null ? d.getSpeaker() : "");
+                dm.put("content", d.getContent() != null ? d.getContent() : "");
+                prevDias.add(dm);
+            }
+            vars.put("previousDialogues", prevDias);
+            vars.put("hasPreviousDialogues", true);
+        } else {
+            vars.put("hasPreviousDialogues", false);
+        }
+
         return vars;
+    }
+
+    /**
+     * Build or retrieve cached character profiles string.
+     * Cached per batch to avoid rebuilding identical profiles for every scene.
+     */
+    private String getCharacterProfilesText(List<Character> presentCharacters, Map<Long, String> emotions) {
+        // Check if cache is valid for these characters
+        if (cachedCharacters != null && cachedCharacters.equals(presentCharacters)) {
+            return cachedCharacterProfiles;
+        }
+        // Rebuild cache
+        String profiles = buildCharacterContexts(presentCharacters, emotions);
+        cachedCharacters = new ArrayList<>(presentCharacters);
+        cachedCharacterProfiles = profiles;
+        return profiles;
+    }
+
+    /** Invalidate the character profile cache between batches. */
+    public void invalidateProfileCache() {
+        cachedCharacters = null;
+        cachedCharacterProfiles = null;
     }
 
     private String buildInlinePrompt(Scene scene,
                                      List<Character> presentCharacters,
                                      List<PlotEvent> sceneEvents,
                                      Scene previousScene,
-                                     Map<Long, String> characterEmotions) {
+                                     Map<Long, String> characterEmotions,
+                                     List<Dialogue> previousDialogues) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一位专业影视编剧，请为以下场景生成高质量的角色对话。\n\n");
 
@@ -341,8 +408,20 @@ public class DialogueAgent {
         // ── Scene context ─────────────────────────────
         sb.append(buildSceneContext(scene, previousScene, sceneEvents));
 
-        // ── Character context ─────────────────────────
-        sb.append(buildCharacterContexts(presentCharacters, characterEmotions));
+        // ── Character context (use cached profiles) ──
+        sb.append(getCharacterProfilesText(presentCharacters, characterEmotions));
+
+        // ── Previous scene's dialogue context ──────────
+        if (previousDialogues != null && !previousDialogues.isEmpty()) {
+            sb.append("## 上一场景的最后几句对白（注意保持人物说话风格和情绪连续性）\n\n");
+            int start = Math.max(0, previousDialogues.size() - 3);
+            for (int i = start; i < previousDialogues.size(); i++) {
+                Dialogue d = previousDialogues.get(i);
+                sb.append(String.format("- %s: \"%s\"\n",
+                        d.getSpeaker(), d.getContent()));
+            }
+            sb.append("\n");
+        }
 
         // ── Output format ─────────────────────────────
         sb.append("""
@@ -452,7 +531,7 @@ public class DialogueAgent {
 
     private String buildSuggestPrompt(Scene scene, List<Dialogue> existingDialogues, List<Character> characters) {
         StringBuilder sb = new StringBuilder();
-        sb.append(buildInlinePrompt(scene, characters, null, null, null));
+        sb.append(buildInlinePrompt(scene, characters, null, null, null, null));
         sb.append("\n## 已有对话\n\n");
 
         if (existingDialogues != null && !existingDialogues.isEmpty()) {
@@ -468,10 +547,75 @@ public class DialogueAgent {
         return sb.toString();
     }
 
+    // ── Streaming Call ────────────────────────────────────
+
+    /**
+     * Call the AI model with SSE streaming, falling back to blocking if unavailable.
+     * Uses OpenAiChatOptions to override max_tokens for dialogue generation.
+     */
+    private String callWithStreaming(ChatModel model, org.springframework.ai.chat.prompt.Prompt prompt, int maxTokens) {
+        String provider = TaskType.DIALOGUE_GENERATE.getDefaultProvider();
+        ChatClient streamingClient = streamingChatClients.get(provider);
+
+        if (streamingClient != null) {
+            try {
+                log.debug("DialogueAgent: using SSE streaming (maxTokens={})", maxTokens);
+                StringBuilder fullResponse = new StringBuilder();
+
+                var promptBuilder = streamingClient.prompt()
+                        .messages(prompt.getInstructions());
+
+                // Override max_tokens for dialogue
+                if (maxTokens > 0) {
+                    promptBuilder.options(OpenAiChatOptions.builder()
+                            .maxTokens(maxTokens).build());
+                }
+
+                Flux<ChatResponse> stream = promptBuilder.stream().chatResponse();
+                List<ChatResponse> chunks = stream.collectList()
+                        .block(Duration.ofSeconds(DIALOGUE_STREAM_TIMEOUT_SECONDS));
+
+                if (chunks != null && !chunks.isEmpty()) {
+                    for (ChatResponse chunk : chunks) {
+                        if (chunk.getResult() != null
+                                && chunk.getResult().getOutput() != null
+                                && chunk.getResult().getOutput().getText() != null) {
+                            fullResponse.append(chunk.getResult().getOutput().getText());
+                        }
+                    }
+                    String text = fullResponse.toString();
+                    if (!text.isBlank()) {
+                        log.debug("DialogueAgent: streaming collected {} chunks → {} chars",
+                                chunks.size(), text.length());
+                        return text;
+                    }
+                }
+                log.debug("DialogueAgent: streaming returned empty, falling back to blocking");
+            } catch (Exception e) {
+                log.debug("DialogueAgent: streaming failed ({}), falling back to blocking", e.getMessage());
+            }
+        }
+
+        // ── Blocking fallback ──
+        try {
+            ChatResponse response = model.call(prompt);
+            logTokenUsage(response, prompt.getContents().toString(), "dialogue-generation");
+            return response.getResult().getOutput().getText();
+        } catch (Exception e) {
+            log.error("DialogueAgent: blocking call failed: {}", e.getMessage());
+            throw new RuntimeException("Dialogue AI generation failed: " + e.getMessage(), e);
+        }
+    }
+
     // ── Response Parsing ────────────────────────────────
 
+    /** Parse response from ChatResponse object (legacy path for suggestNext). */
     private List<Dialogue> parseResponse(ChatResponse response, Scene scene, List<Character> characters) {
-        String content = response.getResult().getOutput().getText();
+        return parseResponseFromText(response.getResult().getOutput().getText(), scene, characters);
+    }
+
+    /** Parse response from raw text (primary path for streaming). */
+    private List<Dialogue> parseResponseFromText(String content, Scene scene, List<Character> characters) {
         List<Dialogue> dialogues = new ArrayList<>();
 
         // ── Try bare array first: [...] ──
@@ -771,25 +915,76 @@ public class DialogueAgent {
 
     /**
      * Parse a JSON string representing an array of dialogue objects.
-     * Handles nested braces within dialogue objects.
+     * Uses balanced-brace tracking to correctly handle nested {} in content fields.
      */
     private List<Dialogue> parseDialogueList(String jsonText, Scene scene, List<Character> characters) {
         List<Dialogue> dialogues = new ArrayList<>();
         if (jsonText == null || jsonText.isBlank()) return dialogues;
 
-        // Find all top-level JSON objects
-        Pattern dialogPattern = Pattern.compile("\\{[^}]+}");
-        Matcher dialogMatcher = dialogPattern.matcher(jsonText);
+        // Find all top-level JSON objects using balanced brace tracking
+        int i = 0;
+        while (i < jsonText.length()) {
+            int braceStart = jsonText.indexOf('{', i);
+            if (braceStart == -1) break;
 
-        while (dialogMatcher.find()) {
-            String block = dialogMatcher.group();
+            String block = extractBalancedJson(jsonText, braceStart);
+            if (block == null) {
+                i = braceStart + 1;
+                continue;
+            }
+
             Dialogue d = parseDialogueBlock(block, scene, characters);
             if (d != null) {
                 dialogues.add(d);
             }
+            i = braceStart + block.length();
         }
 
         return dialogues;
+    }
+
+    /**
+     * Extract a balanced JSON object starting at {@code startPos}.
+     * Tracks brace depth and handles strings with escaped quotes.
+     * Same algorithm as CharacterAgent.extractBalancedJson.
+     */
+    private static String extractBalancedJson(String text, int startPos) {
+        if (startPos >= text.length()) return null;
+        if (text.charAt(startPos) != '{') return null;
+
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = startPos; i < text.length(); i++) {
+            char c = text.charAt(i);
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substring(startPos, i + 1);
+                }
+            }
+        }
+        return null; // unbalanced
     }
 
     private Dialogue parseDialogueBlock(String block, Scene scene, List<Character> characters) {

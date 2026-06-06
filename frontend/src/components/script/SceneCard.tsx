@@ -759,7 +759,7 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                     'absolute -left-10 top-1 flex items-center gap-0.5 transition-opacity duration-150 z-20',
                     deletingId === ci.item.id || editingId === ci.item.id
                       ? 'opacity-100'
-                      : 'opacity-0 group-hover/row:opacity-100'
+                      : 'opacity-100'
                   )}
                 >
                   {/* Drag handle */}

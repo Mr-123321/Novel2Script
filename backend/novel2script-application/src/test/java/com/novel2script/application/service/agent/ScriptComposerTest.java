@@ -41,7 +41,7 @@ class ScriptComposerTest {
 
     @BeforeEach
     void setUp() {
-        composer = new ScriptComposer(new ActionAgent(null, null, null));
+        composer = new ScriptComposer(new ActionAgent(null, null, null, null));
         validator = new CompositionValidator();
 
         // Build test data

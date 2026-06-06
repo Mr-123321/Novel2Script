@@ -93,6 +93,25 @@ public class ScriptController {
                 });
     }
 
+    @DeleteMapping("/{id}")
+    @Operation(summary = "删除指定剧本")
+    public ResponseEntity<Object> deleteScript(@PathVariable Long id) {
+        return scriptService.findById(id)
+                .<ResponseEntity<Object>>map(script -> {
+                    scriptService.deleteScript(id);
+                    Map<String, Object> resp = new LinkedHashMap<>();
+                    resp.put("message", "剧本已删除");
+                    resp.put("scriptId", id);
+                    return ResponseEntity.ok(resp);
+                })
+                .orElseGet(() -> {
+                    Map<String, Object> notFound = new LinkedHashMap<>();
+                    notFound.put("code", 404);
+                    notFound.put("message", "剧本不存在: id=" + id);
+                    return ResponseEntity.status(404).body(notFound);
+                });
+    }
+
     @GetMapping(value = "/{id}/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "SSE 实时推送剧本生成进度")
     public SseEmitter streamProgress(@PathVariable Long id) {
