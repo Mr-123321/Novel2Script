@@ -19,6 +19,8 @@ function getRoleBadgeVariant(role: string) {
   switch (role) {
     case 'PROTAGONIST':
       return 'default' as const;
+    case 'DEUTERAGONIST':
+      return 'default' as const;
     case 'ANTAGONIST':
       return 'destructive' as const;
     case 'SUPPORTING':

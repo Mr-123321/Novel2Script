@@ -43,6 +43,7 @@ export function CharacterEditor({ character }: CharacterEditorProps) {
 
   const roleTypes = [
     { value: 'PROTAGONIST', color: 'teal' },
+    { value: 'DEUTERAGONIST', color: 'blue' },
     { value: 'ANTAGONIST', color: 'red' },
     { value: 'SUPPORTING', color: 'purple' },
     { value: 'MINOR', color: 'gray' },
