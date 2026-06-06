@@ -1,4 +1,4 @@
-export type CharacterRoleType = 'PROTAGONIST' | 'ANTAGONIST' | 'SUPPORTING' | 'MINOR';
+export type CharacterRoleType = 'PROTAGONIST' | 'DEUTERAGONIST' | 'ANTAGONIST' | 'SUPPORTING' | 'MINOR';
 
 export interface Relationship {
   target: string;
