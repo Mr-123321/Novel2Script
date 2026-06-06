@@ -1,5 +1,6 @@
 package com.novel2script.api.controller;
 
+import com.novel2script.api.util.SseEmitterUtils;
 import com.novel2script.application.service.NovelService;
 import com.novel2script.application.service.ScriptService;
 import com.novel2script.common.enums.WorkflowStep;
@@ -36,6 +37,7 @@ public class ScriptController {
 
     private final ScriptService scriptService;
     private final NovelService novelService;
+    private final SseEmitterUtils sseUtils;
 
     @PostMapping("/generate")
     @Operation(summary = "发起剧本生成任务，返回执行 ID 用于跟踪进度")
@@ -144,10 +146,8 @@ public class ScriptController {
                         scriptOpt.map(Script::getTitle).orElse("Generating...")
                 );
 
-                emitter.send(SseEmitter.event()
-                        .id(String.valueOf(System.currentTimeMillis()))
-                        .name("progress")
-                        .data(gp));
+                // ✅ Uses SseEmitterUtils — safely serializes any object to JSON
+                sseUtils.send(emitter, "progress", gp);
 
                 // Check for FAILED status — send error event and stop
                 if (scriptOpt.isPresent() && scriptOpt.get().getStatus() != null
@@ -157,32 +157,31 @@ public class ScriptController {
                     if (ws != null && ws.get("error") instanceof String err) {
                         errorMsg = err;
                     }
-                    emitter.send(SseEmitter.event()
-                            .name("error")
-                            .data(Map.of("scriptId", id, "status", "FAILED",
-                                    "message", errorMsg)));
+                    // ✅ Uses SseEmitterUtils — safely serializes Map to JSON
+                    sseUtils.send(emitter,
+                            SseEmitter.event().name("error"),
+                            Map.of("scriptId", id, "status", "FAILED",
+                                    "message", errorMsg));
                     emitter.complete();
                     cleanup.run();
                     return;
                 }
 
                 if (progress >= 100.0) {
-                    emitter.send(SseEmitter.event()
-                            .name("complete")
-                            .data(Map.of("scriptId", id, "status", "COMPLETED")));
+                    sseUtils.send(emitter,
+                            SseEmitter.event().name("complete"),
+                            Map.of("scriptId", id, "status", "COMPLETED"));
                     emitter.complete();
                     cleanup.run();
                 }
-            } catch (IOException e) {
-                // Client disconnected — this is normal, not an error
-                log.info("SSE client disconnected for script id={}", id);
-                cleanup.run();
             } catch (Exception e) {
-                // Other unexpected error — log and stop
-                log.warn("SSE send error for script id={}: {}", id, e.getMessage());
+                // Client disconnect or send failure — log and stop
+                if (e instanceof IOException) {
+                    log.info("SSE client disconnected for script id={}", id);
+                } else {
+                    log.warn("SSE send error for script id={}: {}", id, e.getMessage());
+                }
                 cleanup.run();
-                // DO NOT call completeWithError — it triggers global exception handler
-                // which tries to write JSON ProblemDetail into a dead SSE stream
                 try {
                     emitter.complete();
                 } catch (Exception ignored) {

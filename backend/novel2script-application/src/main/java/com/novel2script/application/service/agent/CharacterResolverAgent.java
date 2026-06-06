@@ -68,16 +68,28 @@ public class CharacterResolverAgent {
     private final PromptRegistry promptRegistry;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Whether to use embedding-based merging (Layer 2).
+     * When false (default), only rule-based merging is used.
+     * Set via {@code novel2script.character.resolver.use-embedding-merge} in YAML.
+     */
+    private final boolean useEmbeddingMerge;
+
     public CharacterResolverAgent(MilvusVectorStore vectorStore,
                                    EmbeddingService embeddingService,
                                    AiModelRouter modelRouter,
                                    PromptRegistry promptRegistry,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   @org.springframework.beans.factory.annotation.Value(
+                                       "${novel2script.character.resolver.use-embedding-merge:false}")
+                                   boolean useEmbeddingMerge) {
         this.vectorStore = vectorStore;
         this.embeddingService = embeddingService;
         this.modelRouter = modelRouter;
         this.promptRegistry = promptRegistry;
         this.objectMapper = objectMapper;
+        this.useEmbeddingMerge = useEmbeddingMerge;
+        log.info("CharacterResolverAgent: useEmbeddingMerge={}", useEmbeddingMerge);
     }
 
     // ── Public API ────────────────────────────────────────
@@ -365,8 +377,12 @@ public class CharacterResolverAgent {
     // ── Layer 2: Embedding-based merging ──────────────────
 
     /**
-     * Merge a group of potentially-identical characters using embedding similarity.
-     * The canonical name is the one with the longest description (most information).
+     * Merge a group of potentially-identical characters.
+     *
+     * <p>When {@link #useEmbeddingMerge} is enabled, uses embedding similarity
+     * to verify merge decisions and stores vectors for future dedup.
+     * When disabled (default), uses only rule-based merging with canonical selection
+     * — this avoids embedding API 404 errors when the model is unavailable.
      */
     private Character mergeViaEmbedding(List<CharacterExtractionResult> group) {
         if (group.size() == 1) {
@@ -381,14 +397,11 @@ public class CharacterResolverAgent {
                         + (c.relationships().size() * 5)))
                 .orElse(group.get(0));
 
-        // Characters in the same rule-based group are considered the same person.
-        // Collect all aliases from all members.
+        // Collect all aliases from all members
         List<String> allAliases = new ArrayList<>(canonical.aliases());
-        List<String> mergedNames = new ArrayList<>();
 
         for (CharacterExtractionResult c : group) {
             if (c == canonical) continue;
-            mergedNames.add(c.name());
             if (!allAliases.contains(c.name())) {
                 allAliases.add(c.name());
             }
@@ -399,18 +412,24 @@ public class CharacterResolverAgent {
             }
         }
 
-        // Generate embedding for canonical and store in vector store
-        try {
-            String text = canonical.name() + " "
-                    + (canonical.description() != null ? canonical.description() : "");
-            float[] embedding = embeddingService.embed(text);
-            Map<String, Object> metadata = new HashMap<>();
-            metadata.put("name", canonical.name());
-            metadata.put("description", canonical.description());
-            metadata.put("aliases", allAliases);
-            vectorStore.insertCharacter(canonical.name(), embedding, metadata);
-        } catch (Exception e) {
-            log.debug("CharacterResolverAgent: vector store insert skipped: {}", e.getMessage());
+        // ── Optional: Embedding-based verification ──
+        if (useEmbeddingMerge) {
+            try {
+                String text = canonical.name() + " "
+                        + (canonical.description() != null ? canonical.description() : "");
+                float[] embedding = embeddingService.embed(text);
+                Map<String, Object> metadata = new HashMap<>();
+                metadata.put("name", canonical.name());
+                metadata.put("description", canonical.description());
+                metadata.put("aliases", allAliases);
+                vectorStore.insertCharacter(canonical.name(), embedding, metadata);
+                log.debug("CharacterResolverAgent: stored embedding for '{}'", canonical.name());
+            } catch (Exception e) {
+                log.debug("CharacterResolverAgent: embedding insert skipped for '{}': {}",
+                        canonical.name(), e.getMessage());
+            }
+        } else {
+            log.debug("CharacterResolverAgent: embedding merge disabled — using rule-based only");
         }
 
         // Build merged character
@@ -418,8 +437,8 @@ public class CharacterResolverAgent {
         domain.setAliases(allAliases);
         domain.setResolved(true);
 
-        log.debug("CharacterResolverAgent: merged group of {} into '{}' with {} aliases",
-                group.size(), canonical.name(), allAliases.size());
+        log.debug("CharacterResolverAgent: merged group of {} into '{}' with {} aliases (embedding={})",
+                group.size(), canonical.name(), allAliases.size(), useEmbeddingMerge);
 
         return domain;
     }

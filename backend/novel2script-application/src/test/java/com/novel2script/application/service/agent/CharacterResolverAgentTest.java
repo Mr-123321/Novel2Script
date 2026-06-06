@@ -35,7 +35,7 @@ class CharacterResolverAgentTest {
         embeddingService = new EmbeddingService(null);
         // Only rule-based + embedding layers (no LLM in unit tests)
         agent = new CharacterResolverAgent(vectorStore, embeddingService,
-                null, null, new ObjectMapper());
+                null, null, new ObjectMapper(), false);
     }
 
     // ── Chinese name analysis ────────────────────────────

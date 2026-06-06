@@ -41,16 +41,19 @@ public class SpringAiConfig {
     }
 
     /**
-     * Custom {@link RestClient.Builder} with HTTP timeouts.
-     * Prevents AI API calls from hanging indefinitely.
-     * connect timeout = 5s, read timeout = 30s (balanced for AI response time).
+     * Custom {@link RestClient.Builder} with HTTP timeouts tuned for AI streaming.
+     * connect timeout = 10s, read timeout = 120s (accommodates long AI generations).
+     * <p>
+     * When streaming is enabled ({@code stream: true}), the AI sends SSE events
+     * incrementally, keeping the connection alive and preventing timeouts even
+     * for multi-minute generation tasks.
      */
     @Bean
     @Primary
     public RestClient.Builder restClientBuilder() {
         var requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(5_000);   // 5 seconds
-        requestFactory.setReadTimeout(30_000);      // 30 seconds
+        requestFactory.setConnectTimeout(10_000);   // 10 seconds
+        requestFactory.setReadTimeout(120_000);      // 120 seconds — AI generation can take time
         return RestClient.builder().requestFactory(requestFactory);
     }
 
@@ -83,11 +86,12 @@ public class SpringAiConfig {
                         .restClientBuilder(restClientBuilder)
                         .build();
 
-                // Build chat options from YAML config
+                // Build chat options from YAML config (including streaming)
                 OpenAiChatOptions chatOptions = OpenAiChatOptions.builder()
                         .model(opts.getModel())
                         .temperature(opts.getTemperature())
                         .maxTokens(opts.getMaxTokens())
+                        .streamUsage(opts.isStream())
                         .build();
 
                 OpenAiChatModel chatModel = OpenAiChatModel.builder()
@@ -96,8 +100,8 @@ public class SpringAiConfig {
                         .build();
 
                 models.put(name, chatModel);
-                log.info("✅ ChatModel ready: {} ({}) timeout: connect=5s read=30s",
-                        name, opts.getModel());
+                log.info("✅ ChatModel ready: {} ({}) timeout: connect=10s read=120s stream={}",
+                        name, opts.getModel(), opts.isStream());
             } catch (Exception e) {
                 log.error("❌ Failed to create ChatModel for provider '{}': {}", name, e.getMessage());
                 throw new IllegalStateException(
@@ -130,46 +134,106 @@ public class SpringAiConfig {
         return clients;
     }
 
-    // ── EmbeddingModel bean (optional) ───────────────────
+    // ── Streaming ChatClient (for long-generation tasks) ─
 
     /**
-     * Create an {@link EmbeddingModel} using the default provider (deepseek).
-     * If no API key is configured, returns null and EmbeddingService will use hash-based fallback.
+     * Build a streaming {@link ChatClient} keyed by provider name.
+     * Agents performing long-generation tasks (e.g., script composition)
+     * should use this client with {@code .prompt().stream().chatResponse()}
+     * to receive SSE events incrementally, avoiding read-timeout.
      *
-     * @return EmbeddingModel or null if not configured
+     * @see com.novel2script.application.service.agent.ScriptGenerationAgent
+     */
+    @Bean
+    public Map<String, ChatClient> streamingChatClients(Map<String, ChatModel> chatModels) {
+        Map<String, ChatClient> clients = new HashMap<>();
+        chatModels.forEach((name, model) ->
+                clients.put(name, ChatClient.builder(model).build()));
+        return clients;
+    }
+
+    // ── EmbeddingModel bean (with graceful fallback) ─────
+
+    /**
+     * Create an {@link EmbeddingModel} using the configured embedding model
+     * (default: Qwen {@code text-embedding-v1}) via the default provider's API.
+     *
+     * <h3>Fallback chain</h3>
+     * <ol>
+     *   <li>Try to create {@link OpenAiEmbeddingModel} with configured model</li>
+     *   <li>If the default provider has no API key → return {@code null}</li>
+     *   <li>If creation throws → log warning, return {@code null}</li>
+     *   <li>{@link com.novel2script.infrastructure.vector.EmbeddingService}
+     *       detects {@code null} and falls back to hash-based embedding</li>
+     * </ol>
+     *
+     * @return EmbeddingModel or {@code null} if unavailable
      */
     @Bean
     @org.springframework.context.annotation.Primary
-    public EmbeddingModel embeddingModel() {
-        String defaultProvider = multiModelProperties.getDefaultProvider();
-        MultiModelProperties.ProviderConfig config = multiModelProperties.getProviders().get(defaultProvider);
+    public EmbeddingModel embeddingModel(RestClient.Builder restClientBuilder) {
+        MultiModelProperties.EmbeddingConfig embConfig = multiModelProperties.getEmbedding();
 
-        if (config == null || config.getApiKey() == null || config.getApiKey().isBlank()) {
-            log.info("No API key configured for default provider '{}', EmbeddingModel will not be created", defaultProvider);
+        // ── Check if embedding is explicitly disabled ──
+        if (!embConfig.isEnabled()) {
+            log.info("⏭️  Embedding model disabled via config — will use hash-based fallback");
             return null;
         }
 
+        String modelName = embConfig.getModel();
+        String defaultProvider = multiModelProperties.getDefaultProvider();
+        MultiModelProperties.ProviderConfig providerConfig =
+                multiModelProperties.getProviders().get(defaultProvider);
+
+        // ── Check provider availability ──
+        if (providerConfig == null) {
+            log.warn("⚠️  Default provider '{}' not configured — embedding model unavailable, "
+                    + "falling back to hash-based embedding", defaultProvider);
+            return null;
+        }
+
+        if (providerConfig.getApiKey() == null || providerConfig.getApiKey().isBlank()) {
+            log.warn("⚠️  No API key for provider '{}' — embedding model unavailable, "
+                    + "falling back to hash-based embedding", defaultProvider);
+            return null;
+        }
+
+        // ── Build the embedding model ──
         try {
+            log.info("🔧 Creating EmbeddingModel: provider={}, model={}, baseUrl={}",
+                    defaultProvider, modelName, providerConfig.getBaseUrl());
+
             OpenAiApi api = OpenAiApi.builder()
-                    .baseUrl(config.getBaseUrl())
-                    .apiKey(config.getApiKey())
+                    .baseUrl(providerConfig.getBaseUrl())
+                    .apiKey(providerConfig.getApiKey())
+                    .restClientBuilder(restClientBuilder)
                     .build();
 
             OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
-                    .model("deepseek-embedding")
+                    .model(modelName)                       // ← configurable (text-embedding-v1)
                     .build();
 
-            OpenAiEmbeddingModel embeddingModel = new OpenAiEmbeddingModel(
+            OpenAiEmbeddingModel model = new OpenAiEmbeddingModel(
                     api,
                     org.springframework.ai.document.MetadataMode.EMBED,
                     options
             );
 
-            log.info("✅ Created EmbeddingModel for provider: {}", defaultProvider);
-            return embeddingModel;
+            log.info("✅ EmbeddingModel created successfully: model={}, provider={}, dimensions=1536",
+                    modelName, defaultProvider);
+            return model;
+
         } catch (Exception e) {
-            log.warn("Failed to create EmbeddingModel for provider '{}': {}. Using hash-based fallback.",
-                    defaultProvider, e.getMessage());
+            log.warn("┌─────────────────────────────────────────────────────");
+            log.warn("│ ⚠️  EmbeddingModel creation FAILED");
+            log.warn("│ Provider: {}", defaultProvider);
+            log.warn("│ Model:    {}", modelName);
+            log.warn("│ Error:    {}", e.getMessage());
+            log.warn("│ Action:   Falling back to hash-based embedding");
+            log.warn("│ Impact:   Vector search accuracy will be reduced");
+            log.warn("│           (cosine similarity on hash embeddings)");
+            log.warn("│ Fix:      Verify API key and network connectivity");
+            log.warn("└─────────────────────────────────────────────────────");
             return null;
         }
     }

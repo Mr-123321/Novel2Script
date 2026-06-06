@@ -32,69 +32,127 @@ public class NovelController {
     /**
      * Auto-detect file encoding. Tries UTF-8 first, then common Chinese encodings.
      * Chinese novels from Chinese websites often use GBK/GB2312/GB18030 encoding.
+     *
+     * <p>Detection strategy (scored heuristics):
+     * <ol>
+     *   <li>UTF-8 — check for replacement chars and control chars</li>
+     *   <li>GB18030 (superset of GBK/GB2312) — check for high CJK ratio</li>
+     *   <li>GBK — fallback for older files</li>
+     *   <li>Windows-1252 → re-interpret as UTF-8 (fixes double-encoding)</li>
+     * </ol>
      */
     private String decodeWithDetection(byte[] bytes, String fileName) {
-        // Try UTF-8 first (most common for modern files)
+        // ── Strategy 1: UTF-8 ──
         String utf8 = new String(bytes, StandardCharsets.UTF_8);
-        if (isValidText(utf8)) {
-            log.debug("File '{}' detected as UTF-8", fileName);
+        EncodingScore utf8Score = scoreEncoding(utf8);
+        if (utf8Score.isValid() && utf8Score.cjkRatio() > 0.05) {
+            log.info("📄 '{}' → UTF-8 (score: {})", fileName, utf8Score);
             return utf8;
         }
 
-        // Try GB18030 (superset of GBK and GB2312) — common for Chinese novels
+        // ── Strategy 2: GB18030 (modern Chinese encoding, superset of GBK) ──
         try {
-            String gbk = new String(bytes, Charset.forName("GB18030"));
-            if (isLikelyChinese(gbk)) {
-                log.info("File '{}' detected as GB18030/GBK (Chinese encoding), converted to UTF-8 internally", fileName);
-                return gbk;
+            String gb18030 = new String(bytes, Charset.forName("GB18030"));
+            EncodingScore gbScore = scoreEncoding(gb18030);
+            if (gbScore.isValid() && gbScore.cjkRatio() > 0.10) {
+                log.info("📄 '{}' → GB18030 (score: {}, CJK: {:.1f}%)",
+                        fileName, gbScore, gbScore.cjkRatio() * 100);
+                return gb18030;
             }
         } catch (Exception ignored) {}
 
-        // Try GBK explicitly
+        // ── Strategy 3: GBK (older Chinese encoding) ──
         try {
             String gbk = new String(bytes, Charset.forName("GBK"));
-            if (isLikelyChinese(gbk)) {
-                log.info("File '{}' detected as GBK (Chinese encoding), converted to UTF-8 internally", fileName);
+            EncodingScore gbkScore = scoreEncoding(gbk);
+            if (gbkScore.isValid() && gbkScore.cjkRatio() > 0.10) {
+                log.info("📄 '{}' → GBK (score: {}, CJK: {:.1f}%)",
+                        fileName, gbkScore, gbkScore.cjkRatio() * 100);
                 return gbk;
             }
         } catch (Exception ignored) {}
 
-        // Fallback: return UTF-8 version (may have garbled chars) and warn
-        log.warn("File '{}' encoding uncertain — defaulting to UTF-8. Content may be garbled if file uses non-UTF-8 encoding.", fileName);
+        // ── Strategy 4: Double-encoding repair ──
+        // If UTF-8 decoding looks "Latin-1 heavy", the file may be GBK bytes
+        // that were incorrectly encoded as UTF-8 by an upstream tool.
+        // Re-encode as Latin-1, then re-decode as GBK.
+        if (utf8Score.cjkRatio() < 0.02
+                && utf8Score.latinRatio() > 0.30
+                && utf8Score.replacementCount() == 0) {
+            try {
+                // Re-interpret: take the garbled UTF-8 string, encode back to Latin-1 bytes,
+                // then decode as GB18030
+                byte[] reEncoded = utf8.getBytes(Charset.forName("ISO-8859-1"));
+                String repaired = new String(reEncoded, Charset.forName("GB18030"));
+                EncodingScore repairedScore = scoreEncoding(repaired);
+                if (repairedScore.cjkRatio() > 0.10) {
+                    log.warn("🔧 '{}' — detected double-encoding (UTF-8→Latin1→GB18030 repair). "
+                            + "CJK ratio: {:.1f}%. Content has been repaired.",
+                            fileName, repairedScore.cjkRatio() * 100);
+                    return repaired;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // ── Fallback: return UTF-8 with warning ──
+        if (utf8Score.cjkRatio() < 0.01) {
+            log.warn("⚠️  '{}' — encoding detection failed. CJK ratio too low ({:.1f}%). "
+                    + "Content may be garbled. Check that the file is a valid Chinese text file.",
+                    fileName, utf8Score.cjkRatio() * 100);
+        } else {
+            log.info("📄 '{}' → UTF-8 (fallback, CJK: {:.1f}%)", fileName, utf8Score.cjkRatio() * 100);
+        }
         return utf8;
     }
 
-    /** Check if text looks like valid UTF-8 decoded content */
-    private boolean isValidText(String text) {
-        if (text == null || text.isEmpty()) return false;
-        // Check for replacement character (U+FFFD) which indicates decoding errors
-        long replacementCount = text.chars().filter(c -> c == '�').count();
-        if (replacementCount > text.length() * 0.01) return false; // >1% replacement chars = bad
-        // Check for common garbled patterns
-        int garbledCount = 0;
-        for (int i = 0; i < Math.min(text.length(), 500); i++) {
-            char c = text.charAt(i);
-            // Unusual control chars (not common whitespace) indicate encoding issues
-            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') garbledCount++;
+    /**
+     * Score a decoded string for encoding quality.
+     */
+    private EncodingScore scoreEncoding(String text) {
+        if (text == null || text.isEmpty()) {
+            return new EncodingScore(0, 0, 0, 0, true);
         }
-        return garbledCount < 5;
-    }
 
-    /** Check if text looks like valid Chinese text (high proportion of CJK chars) */
-    private boolean isLikelyChinese(String text) {
-        if (text == null || text.isEmpty()) return false;
-        int sampleLen = Math.min(text.length(), 500);
+        int sampleLen = Math.min(text.length(), 2000);
         int cjkCount = 0;
+        int latinCount = 0;
+        int replacementCount = 0;
+        int controlCharCount = 0;
+
         for (int i = 0; i < sampleLen; i++) {
             char c = text.charAt(i);
-            if (Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
-                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
-                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B) {
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(c);
+
+            if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                    || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                    || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
+                    || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS) {
                 cjkCount++;
+            } else if (c == '�') {
+                replacementCount++;
+            } else if (c >= 0x00C0 && c <= 0x00FF) {
+                latinCount++;
+            } else if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                controlCharCount++;
             }
         }
-        return cjkCount > sampleLen * 0.15; // at least 15% CJK characters
+
+        double cjkRatio = (double) cjkCount / sampleLen;
+        double latinRatio = (double) latinCount / sampleLen;
+        boolean valid = replacementCount < sampleLen * 0.01   // <1% replacement chars
+                && controlCharCount < 10;                       // few control chars
+
+        return new EncodingScore(cjkRatio, latinRatio, replacementCount, controlCharCount, valid);
     }
+
+    /** Immutable encoding quality score. */
+    private record EncodingScore(
+            double cjkRatio,
+            double latinRatio,
+            int replacementCount,
+            int controlCharCount,
+            boolean isValid
+    ) {}
 
     @PostMapping("/upload")
     @Operation(summary = "Upload a novel file for processing")

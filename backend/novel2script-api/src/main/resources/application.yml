@@ -33,6 +33,11 @@ spring:
     # 默认使用的 AI 提供商（必须在 providers 中配置）
     default-provider: deepseek
 
+    # ── 嵌入模型配置 ──────────────────────────────────────
+    embedding:
+      model: text-embedding-v1    # Qwen embedding model (1536 dims)
+      enabled: true               # set to false to force hash-based fallback
+
     # ── 多提供商配置 ──────────────────────────────────────
     # 每个提供商独立配置 API key、base-url 和 chat 参数
     # 所有提供商均使用 OpenAI 兼容接口协议
@@ -45,6 +50,7 @@ spring:
             model: deepseek-chat
             temperature: 0.7
             max-tokens: 4096
+            stream: true
 
       openai:
         api-key: ${OPENAI_API_KEY:}
@@ -54,6 +60,7 @@ spring:
             model: gpt-4o
             temperature: 0.7
             max-tokens: 4096
+            stream: true
 
       qwen:
         api-key: ${QWEN_API_KEY:}
@@ -63,6 +70,7 @@ spring:
             model: qwen-max
             temperature: 0.7
             max-tokens: 4096
+            stream: true
 
       claude:
         api-key: ${ANTHROPIC_API_KEY:}
@@ -72,6 +80,7 @@ spring:
             model: claude-sonnet-4-6
             temperature: 0.7
             max-tokens: 4096
+            stream: true
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -81,6 +90,19 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# Novel2Script 业务配置
+novel2script:
+  character:
+    resolver:
+      # 是否启用 embedding 合并（Layer 2）
+      # false = 仅使用规则合并，避免 embedding API 404 错误
+      # true  = 使用嵌入向量验证字符合并决策
+      use-embedding-merge: false
+  prompt:
+    cache:
+      ttl-minutes: 60
+      max-size: 500
 
 server:
   port: 8080

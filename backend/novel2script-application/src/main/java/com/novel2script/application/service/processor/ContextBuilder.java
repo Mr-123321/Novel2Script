@@ -107,6 +107,71 @@ public class ContextBuilder {
     }
 
     /**
+     * Build context using hybrid retrieval (vector + keyword) for higher recall.
+     * Especially effective for plot event extraction, character-centric queries,
+     * and entity-heavy tasks where keyword matching complements semantic search.
+     *
+     * <p>Uses Reciprocal Rank Fusion (RRF, k=60) to merge vector similarity
+     * and BM25-style keyword scores without requiring score normalization.
+     *
+     * @param taskQuery     human-readable task description
+     * @param allChunks     all pre-embedded novel chunks
+     * @param maxTokens     maximum context size in tokens
+     * @param vectorWeight  weight of vector scores (0.0–1.0), default 0.6
+     * @return assembled context text with higher recall
+     */
+    public String buildHybridContext(String taskQuery, List<NovelChunk> allChunks,
+                                      int maxTokens, float vectorWeight) {
+        if (allChunks == null || allChunks.isEmpty()) {
+            log.warn("ContextBuilder: no chunks available for hybrid search");
+            return "";
+        }
+
+        int effectiveMaxTokens = maxTokens > 0 ? maxTokens : DEFAULT_MAX_TOKENS;
+
+        // 1. Build chunk lookup map
+        Map<String, NovelChunk> chunkMap = allChunks.stream()
+                .collect(Collectors.toMap(NovelChunk::chunkId, c -> c, (a, b) -> a));
+
+        // 2. Embed the task query
+        float[] queryEmbedding = embeddingService.embed(taskQuery);
+
+        // 3. Hybrid search: vector + keyword via RRF
+        float minScore = 0.25f; // slightly lower threshold for hybrid (keyword boosts recall)
+        int topK = Math.min(50, allChunks.size());
+
+        List<SimilarityResult> hybridResults = vectorStore.searchHybrid(
+                queryEmbedding, taskQuery, topK, minScore, vectorWeight);
+
+        if (hybridResults.isEmpty()) {
+            log.warn("ContextBuilder: hybrid search returned no results for '{}', using fallback",
+                    taskQuery.length() > 50 ? taskQuery.substring(0, 50) + "..." : taskQuery);
+            return fallbackContext(allChunks, effectiveMaxTokens);
+        }
+
+        // 4. Resolve to chunks and sort by original order
+        List<NovelChunk> relevantChunks = hybridResults.stream()
+                .map(r -> chunkMap.get(r.characterId()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted(Comparator.comparingInt(NovelChunk::chunkIndex))
+                .toList();
+
+        log.info("ContextBuilder: hybrid search → {} unique chunks (vectorWeight={})",
+                relevantChunks.size(), vectorWeight);
+
+        // 5. Assemble context within token budget
+        return assembleContext(relevantChunks, effectiveMaxTokens);
+    }
+
+    /**
+     * Build hybrid context with default parameters.
+     */
+    public String buildHybridContext(String taskQuery, List<NovelChunk> allChunks) {
+        return buildHybridContext(taskQuery, allChunks, DEFAULT_MAX_TOKENS, 0.6f);
+    }
+
+    /**
      * Build context for a multi-step task that needs more breadth.
      * Uses a higher top-K for broader coverage.
      */
