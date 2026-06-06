@@ -60,6 +60,33 @@ export function roleLabel(role: string): string {
 }
 
 export const sceneHeader = (scene: { interior: boolean; location: string; timeOfDay: string; sceneNumber: number }) => {
-  const intExt = scene.interior ? 'INT' : 'EXT';
-  return `${intExt}. ${scene.location} - ${scene.timeOfDay}`;
+  const loc = scene.location || '未知地点';
+  // Skip timeOfDay if it's UNKNOWN/unknown or empty
+  const timeStr = (!scene.timeOfDay || scene.timeOfDay === 'UNKNOWN' || scene.timeOfDay === 'unknown')
+    ? ''
+    : ` - ${scene.timeOfDay}`;
+  return `${loc}${timeStr}`;
 };
+
+/**
+ * Sanitize a scene heading string by removing INT/EXT prefix and UNKNOWN suffix.
+ * Handles backend-generated headings like "INT. 教室 - UNKNOWN" → "教室"
+ */
+export function sanitizeSceneHeading(heading: string): string {
+  if (!heading) return '未知地点';
+  let cleaned = heading
+    .replace(/^(INT|EXT)\.\s*/i, '')   // Remove INT/EXT prefix
+    .replace(/\s*-\s*UNKNOWN\s*$/i, '') // Remove trailing "- UNKNOWN"
+    .replace(/\s*-\s*unknown\s*$/i, '')
+    .replace(/\s*-\s*未知\s*$/i, '')   // Also handle Chinese "未知"
+    .trim();
+  return cleaned || '未知地点';
+}
+
+/** Format time of day for display, filtering out UNKNOWN values */
+export function formatTimeOfDay(timeOfDay: string): string {
+  if (!timeOfDay || timeOfDay === 'UNKNOWN' || timeOfDay === 'unknown' || timeOfDay === '未知') {
+    return '';
+  }
+  return timeOfDay;
+}

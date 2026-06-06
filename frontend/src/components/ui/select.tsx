@@ -43,15 +43,17 @@ export function Select({
           !value && 'text-muted-foreground',
           className
         )}
+        style={{ backgroundColor: 'oklch(0.17 0.012 250)', color: 'oklch(0.94 0.005 250)' }}
         {...props}
       >
         {placeholder && (
-          <option value="" disabled>
+          <option value="" disabled style={{ backgroundColor: '#1a1a2e', color: '#ccc' }}>
             {placeholder}
           </option>
         )}
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value} className="bg-background text-foreground">
+          <option key={opt.value} value={opt.value}
+            style={{ backgroundColor: '#1a1a2e', color: '#e0e0e0' }}>
             {opt.label}
           </option>
         ))}
