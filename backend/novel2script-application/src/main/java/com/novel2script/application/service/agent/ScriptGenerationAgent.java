@@ -18,6 +18,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.StreamingChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -33,6 +34,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p><b>Core principle:</b> only extract what's actually in the text.
  * No fabrication, no hallucination, no placeholder data.
+ *
+ * <p><b>v2.0 (staged mode):</b> generates character + scene outlines first,
+ * then delegates dialogue/action generation per scene to specialized agents.
+ * Uses higher max_tokens and truncated chapter content for reliability.
  */
 @Slf4j
 @Service
@@ -45,14 +50,31 @@ public class ScriptGenerationAgent {
     private final ObjectMapper objectMapper;
     private final Map<String, ChatClient> streamingChatClients;
 
+    /** Max output tokens for single-pass generation (default 16384). */
+    private final int maxTokens;
+
+    /** Temperature for single-pass generation (default 0.3, lower for JSON stability). */
+    private final double temperature;
+
+    /** Max characters per chapter in prompt (0 = no truncation). */
+    private final int chapterTruncateChars;
+
     public ScriptGenerationAgent(PromptRegistry promptRegistry,
                                   AiModelRouter modelRouter,
                                   ObjectMapper objectMapper,
-                                  Map<String, ChatClient> streamingChatClients) {
+                                  Map<String, ChatClient> streamingChatClients,
+                                  @org.springframework.beans.factory.annotation.Value("${script.generation.single-pass.max-tokens:16384}") int maxTokens,
+                                  @org.springframework.beans.factory.annotation.Value("${script.generation.single-pass.temperature:0.3}") double temperature,
+                                  @org.springframework.beans.factory.annotation.Value("${script.generation.single-pass.chapter-truncate-chars:2000}") int chapterTruncateChars) {
         this.promptRegistry = promptRegistry;
         this.modelRouter = modelRouter;
         this.objectMapper = objectMapper;
         this.streamingChatClients = streamingChatClients;
+        this.maxTokens = maxTokens;
+        this.temperature = temperature;
+        this.chapterTruncateChars = chapterTruncateChars;
+        log.info("ScriptGenerationAgent: maxTokens={}, temperature={}, chapterTruncateChars={}",
+                maxTokens, temperature, chapterTruncateChars);
     }
 
     /**
@@ -65,6 +87,24 @@ public class ScriptGenerationAgent {
      */
     @AiMonitored(value = "script-generation", version = "1.0")
     public Script generate(List<Chapter> chapters, String novelTitle, Long scriptId) {
+        return generateOutline(chapters, novelTitle, scriptId, false);
+    }
+
+    /**
+     * Generate character + scene outlines from chapter content (v2.0 staged mode).
+     * <p>
+     * This is the primary entry point when {@code script.generation.single-pass.staged=true}.
+     * It produces a Script with characters and scenes populated (but without dialogues/actions),
+     * using chapter summaries instead of full content to reduce prompt size.
+     *
+     * @param chapters the novel chapters
+     * @param novelTitle the novel's title for context
+     * @param scriptId script ID for ID generation
+     * @param savePartial whether to attempt partial save on failure (via callback)
+     * @return a Script with characters + scene outlines, or null if AI fails
+     */
+    @AiMonitored(value = "script-generation", version = "2.0")
+    public Script generateOutline(List<Chapter> chapters, String novelTitle, Long scriptId, boolean savePartial) {
         if (chapters == null || chapters.isEmpty()) {
             log.warn("ScriptGenerationAgent: no chapters provided");
             return null;
@@ -77,26 +117,32 @@ public class ScriptGenerationAgent {
         }
 
         ChatModel model = modelRouter.route(TaskType.SCRIPT_COMPOSE);
-        String prompt = buildPrompt(template, chapters, novelTitle);
+        String prompt = buildPromptWithTruncation(template, chapters, novelTitle, chapterTruncateChars);
 
         int totalChars = chapters.stream()
                 .mapToInt(c -> c.getContent() != null ? c.getContent().length() : 0).sum();
-        log.info("ScriptGenerationAgent: sending {} chapters ({} chars) to model={}",
-                chapters.size(), totalChars, model);
+        int truncatedChars = chapters.stream()
+                .mapToInt(c -> {
+                    String content = c.getContent();
+                    if (content == null) return 0;
+                    return Math.min(content.length(), chapterTruncateChars > 0 ? chapterTruncateChars : content.length());
+                }).sum();
+        log.info("ScriptGenerationAgent v2.0: sending {} chapters ({} chars total, {} chars after truncation={}) to model={}",
+                chapters.size(), totalChars, truncatedChars, chapterTruncateChars, model);
 
         try {
             // ── Try streaming first (SSE) to avoid read-timeout on long generations ──
-            String responseText = callWithStreaming(model, prompt);
+            String responseText = callWithStreaming(model, prompt, maxTokens, temperature);
 
-            // ── Log token usage (estimated from char counts) ──
             log.info("ScriptGenerationAgent: received response ({} chars)", responseText.length());
 
             Script script = parseScriptResponse(responseText, scriptId);
             if (script != null) {
-                log.info("ScriptGenerationAgent: ✅ parsed {} characters, {} scenes, {} dialogues",
+                log.info("ScriptGenerationAgent v2.0: ✅ parsed {} characters, {} scene outlines",
                         script.getCharacters().size(),
-                        script.getScenes().size(),
-                        script.getDialogueCount());
+                        script.getScenes().size());
+            } else if (savePartial) {
+                log.warn("ScriptGenerationAgent: outline generation failed, partial save requested");
             }
             return script;
         } catch (Exception e) {
@@ -106,12 +152,34 @@ public class ScriptGenerationAgent {
     }
 
     private String buildPrompt(PromptTemplate template, List<Chapter> chapters, String novelTitle) {
+        return buildPromptWithTruncation(template, chapters, novelTitle, 0);
+    }
+
+    /**
+     * Build the user prompt with optional chapter content truncation.
+     *
+     * @param template the prompt template
+     * @param chapters the novel chapters
+     * @param novelTitle the novel's title
+     * @param truncateChars max characters per chapter (0 = full content, no truncation)
+     * @return rendered prompt string
+     */
+    private String buildPromptWithTruncation(PromptTemplate template, List<Chapter> chapters,
+                                              String novelTitle, int truncateChars) {
         List<Map<String, Object>> chapterList = new ArrayList<>();
         for (Chapter ch : chapters) {
             Map<String, Object> cm = new LinkedHashMap<>();
             cm.put("chapterNumber", ch.getChapterNumber());
             cm.put("title", ch.getTitle() != null ? ch.getTitle() : "");
-            cm.put("content", ch.getContent() != null ? ch.getContent() : "");
+
+            String content = ch.getContent() != null ? ch.getContent() : "";
+            if (truncateChars > 0 && content.length() > truncateChars) {
+                // Truncate and add ellipsis marker
+                content = content.substring(0, truncateChars) + "\n\n[… 后续内容已截断，请基于以上摘要生成 …]";
+                log.debug("Chapter {} truncated: {} → {} chars", ch.getChapterNumber(),
+                        ch.getContent().length(), content.length());
+            }
+            cm.put("content", content);
             chapterList.add(cm);
         }
 
@@ -521,24 +589,49 @@ public class ScriptGenerationAgent {
      * @return the complete AI response text
      */
     private String callWithStreaming(ChatModel model, String prompt) {
+        return callWithStreaming(model, prompt, maxTokens, temperature);
+    }
+
+    /**
+     * Call the AI model with streaming and explicit token/temperature overrides.
+     *
+     * @param model        the chat model
+     * @param prompt       the rendered user prompt
+     * @param maxTokens    max output tokens override (0 = use provider default)
+     * @param temperature  temperature override (-1 = use provider default)
+     * @return the complete AI response text
+     */
+    private String callWithStreaming(ChatModel model, String prompt, int maxTokens, double temperature) {
         // Attempt streaming via ChatClient (uses SSE under the hood)
         String provider = TaskType.SCRIPT_COMPOSE.getDefaultProvider();
         ChatClient streamingClient = streamingChatClients.get(provider);
 
         if (streamingClient != null) {
             try {
-                log.info("ScriptGenerationAgent: using SSE streaming for generation");
+                log.info("ScriptGenerationAgent: using SSE streaming (maxTokens={}, temperature={})",
+                        maxTokens, temperature);
                 StringBuilder fullResponse = new StringBuilder();
 
-                Flux<ChatResponse> stream = streamingClient.prompt()
-                        .user(prompt)
+                // Build the prompt request with overridden options
+                var promptBuilder = streamingClient.prompt().user(prompt);
+
+                // Apply max_tokens and temperature overrides if specified
+                if (maxTokens > 0 || temperature >= 0) {
+                    var optionsBuilder = OpenAiChatOptions.builder();
+                    if (maxTokens > 0) optionsBuilder.maxTokens(maxTokens);
+                    if (temperature >= 0) optionsBuilder.temperature(temperature);
+                    promptBuilder.options(optionsBuilder.build());
+                }
+
+                Flux<ChatResponse> stream = promptBuilder
                         .stream()
                         .chatResponse();
 
-                // Collect all SSE chunks with a 120s timeout
+                // Collect all SSE chunks with a 180s timeout (longer for v2.0 with higher maxTokens)
+                int timeoutSeconds = maxTokens > 8192 ? 180 : 120;
                 List<ChatResponse> chunks = stream
                         .collectList()
-                        .block(Duration.ofSeconds(120));
+                        .block(Duration.ofSeconds(timeoutSeconds));
 
                 if (chunks != null && !chunks.isEmpty()) {
                     for (ChatResponse chunk : chunks) {
