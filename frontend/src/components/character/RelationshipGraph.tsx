@@ -17,6 +17,39 @@ import { useScriptStore } from '@/stores/script-store';
 import { roleLabel } from '@/lib/utils';
 import type { Character } from '@/types/character';
 
+// ---- Relationship color mapping ----
+const RELATION_COLORS: Record<string, { stroke: string; glow: string }> = {
+  家人:    { stroke: 'oklch(0.65 0.18 40 / 0.8)',  glow: 'oklch(0.65 0.18 40 / 0.3)' },   // warm orange
+  亲戚:    { stroke: 'oklch(0.65 0.18 40 / 0.7)',  glow: 'oklch(0.65 0.18 40 / 0.25)' },
+  恋人:    { stroke: 'oklch(0.58 0.2 0 / 0.8)',    glow: 'oklch(0.58 0.2 0 / 0.3)' },     // rose/pink
+  情侣:    { stroke: 'oklch(0.58 0.2 0 / 0.8)',    glow: 'oklch(0.58 0.2 0 / 0.3)' },
+  夫妻:    { stroke: 'oklch(0.58 0.2 0 / 0.85)',   glow: 'oklch(0.58 0.2 0 / 0.35)' },
+  朋友:    { stroke: 'oklch(0.65 0.14 140 / 0.8)',  glow: 'oklch(0.65 0.14 140 / 0.3)' },  // green
+  好友:    { stroke: 'oklch(0.65 0.14 140 / 0.85)', glow: 'oklch(0.65 0.14 140 / 0.35)' },
+  盟友:    { stroke: 'oklch(0.65 0.14 160 / 0.8)',  glow: 'oklch(0.65 0.14 160 / 0.3)' },  // teal
+  敌人:    { stroke: 'oklch(0.55 0.2 20 / 0.85)',   glow: 'oklch(0.55 0.2 20 / 0.35)' },   // red
+  对手:    { stroke: 'oklch(0.55 0.2 20 / 0.75)',   glow: 'oklch(0.55 0.2 20 / 0.3)' },
+  师徒:    { stroke: 'oklch(0.62 0.15 260 / 0.8)',  glow: 'oklch(0.62 0.15 260 / 0.3)' },  // blue-purple
+  师傅:    { stroke: 'oklch(0.62 0.15 260 / 0.85)', glow: 'oklch(0.62 0.15 260 / 0.35)' },
+  徒弟:    { stroke: 'oklch(0.62 0.15 260 / 0.75)', glow: 'oklch(0.62 0.15 260 / 0.3)' },
+  师生:    { stroke: 'oklch(0.62 0.15 260 / 0.8)',  glow: 'oklch(0.62 0.15 260 / 0.3)' },
+  上下级:  { stroke: 'oklch(0.55 0.08 270 / 0.8)',  glow: 'oklch(0.55 0.08 270 / 0.25)' }, // gray-blue
+  同事:    { stroke: 'oklch(0.55 0.08 270 / 0.75)', glow: 'oklch(0.55 0.08 270 / 0.25)' },
+  相识:    { stroke: 'oklch(0.5 0.03 280 / 0.6)',   glow: 'oklch(0.5 0.03 280 / 0.2)' },   // muted gray
+  邻居:    { stroke: 'oklch(0.5 0.03 280 / 0.6)',   glow: 'oklch(0.5 0.03 280 / 0.2)' },
+};
+
+function getRelationColor(relation: string): { stroke: string; glow: string } {
+  // Try exact match first
+  if (RELATION_COLORS[relation]) return RELATION_COLORS[relation];
+  // Try partial match
+  for (const [key, color] of Object.entries(RELATION_COLORS)) {
+    if (relation.includes(key) || key.includes(relation)) return color;
+  }
+  // Default teal
+  return { stroke: 'oklch(0.72 0.14 185 / 0.6)', glow: 'oklch(0.72 0.14 185 / 0.2)' };
+}
+
 // ---- Layout helpers ----
 function buildLayout(characters: Character[]) {
   const nodes: Node[] = [];
@@ -46,6 +79,7 @@ function buildLayout(characters: Character[]) {
         aliases: char.aliases?.join(', ') || '',
         role: roleLabel(char.roleType),
         appearanceCount: char.appearanceCount,
+        gender: char.gender,
         isProtagonist,
         isAntagonist,
       },
@@ -83,22 +117,28 @@ function buildLayout(characters: Character[]) {
         const edgeKey = [char.id, target.id].sort().join('-');
         if (!edgeSet.has(edgeKey)) {
           edgeSet.add(edgeKey);
+          const colors = getRelationColor(rel.relation);
           edges.push({
             id: `e${char.id}-${target.id}`,
             source: String(char.id),
             target: String(target.id),
             label: rel.relation,
             style: {
-              stroke: 'oklch(0.72 0.14 185 / 0.4)',
-              strokeWidth: 1.5,
+              stroke: colors.stroke,
+              strokeWidth: 2,
             },
             labelStyle: {
-              fill: 'oklch(0.62 0.02 250)',
-              fontSize: 10,
+              fill: 'oklch(0.95 0.005 250)',
+              fontSize: 11,
+              fontWeight: 600,
             },
             labelBgStyle: {
-              fill: 'oklch(0.17 0.012 250 / 0.85)',
+              fill: 'oklch(0.15 0.01 250 / 0.9)',
+              rx: 4,
+              ry: 4,
             },
+            labelBgPadding: [6, 3] as [number, number],
+            labelBgBorderRadius: 4,
             animated: true,
           });
         }
@@ -115,15 +155,24 @@ interface CharacterNodeData {
   aliases: string;
   role: string;
   appearanceCount: number;
+  gender?: string;
   isProtagonist?: boolean;
   isAntagonist?: boolean;
 }
 
 function CharacterNode({ data }: { data: CharacterNodeData }) {
+  const genderLabel = data.gender === 'MALE' ? '♂' : data.gender === 'FEMALE' ? '♀' : '';
   return (
     <div className="relative">
       <div className="text-xs opacity-60 mb-0.5">{data.role}</div>
-      <div className="font-semibold text-sm">{data.label}</div>
+      <div className="font-semibold text-sm">
+        {data.label}
+        {genderLabel && (
+          <span className={`ml-1 text-xs ${data.gender === 'MALE' ? 'text-blue-400' : 'text-pink-400'}`}>
+            {genderLabel}
+          </span>
+        )}
+      </div>
       {data.aliases && (
         <div className="text-[10px] opacity-40 mt-0.5">{data.aliases}</div>
       )}

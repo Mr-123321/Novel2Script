@@ -6,6 +6,11 @@ import { roleLabel } from '@/lib/utils';
 import { User, Users, Hash } from 'lucide-react';
 import type { Character } from '@/types/character';
 
+const GENDER_DISPLAY: Record<string, { label: string; color: string; icon: string }> = {
+  MALE: { label: '男', color: 'text-blue-400', icon: '♂' },
+  FEMALE: { label: '女', color: 'text-pink-400', icon: '♀' },
+};
+
 interface CharacterCardProps {
   character: Character;
 }
@@ -63,6 +68,12 @@ export function CharacterCard({ character }: CharacterCardProps) {
 
       {/* Stats */}
       <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+        {character.gender && GENDER_DISPLAY[character.gender] && (
+          <span className={`flex items-center gap-1 ${GENDER_DISPLAY[character.gender].color}`}>
+            <span className="text-xs font-bold">{GENDER_DISPLAY[character.gender].icon}</span>
+            {GENDER_DISPLAY[character.gender].label}
+          </span>
+        )}
         <span className="flex items-center gap-1">
           <Hash className="h-3 w-3" />
           出场 {character.appearanceCount} 次
