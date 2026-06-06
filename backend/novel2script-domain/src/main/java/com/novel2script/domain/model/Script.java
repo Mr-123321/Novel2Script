@@ -42,6 +42,9 @@ public class Script {
     @Builder.Default
     private List<PlotEvent> plotEvents = new ArrayList<>();
 
+    @Builder.Default
+    private List<PlotInsertion> plotInsertions = new ArrayList<>();
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
