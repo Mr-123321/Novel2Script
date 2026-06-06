@@ -270,7 +270,7 @@ public class GenerationOrchestrator {
         scriptService.updateProgress(scriptId, 95.0, WorkflowStep.ACTION_GENERATE);
 
         // Complete
-        String title = novel.getTitle() + " — 剧本";
+        String title = novel.getTitle();
         script.setTitle(title);
         script.setCharacters(characters);
         script.setScenes(scenes);

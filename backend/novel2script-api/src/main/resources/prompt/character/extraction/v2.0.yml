@@ -34,6 +34,8 @@ system: |
   - 识别角色的性格特征（勇气、智慧、野心、善良等）
   - **必须推断角色之间的关系**（朋友、敌人、家人、恋人、师徒等），即使小说未明确写出，也要根据角色互动推断
   - 判断角色类型（主角、反派、配角、次要角色）
+  - **必须统计每个角色的出场次数（appearance_count）**：统计该角色在章节中出现的次数（包括提及姓名、别名、对话等），至少为1
+  - **必须推断角色的性别（gender）**：根据名字、称呼（他/她）、描述等推断，值为"MALE"（男）、"FEMALE"（女）或"UNKNOWN"（未知）
   - 关系字段不要留空！对每个主要角色至少列出1-2个关系
   - **注意区分角色与场景描述**：角色的名字不会包含动作词（如"垂落""颤动""转身"），也不会是身体部位（如"睫毛""手指"）
 
@@ -72,10 +74,12 @@ few_shot:
             "name": "林川",
             "aliases": ["川哥"],
             "role_type": "PROTAGONIST",
-            "gender": "男",
+            "gender": "MALE",
             "age_range": "20-25",
             "personality": ["好奇心强", "适应力强", "理性"],
             "description": "大学生，意外穿越到异世界，拥有现代知识",
+            "appearance_count": 1,
+            "first_appearance_chapter": "第1章 穿越",
             "relationships": [
               {"target": "老王", "relation": "室友"},
               {"target": "苏晴", "relation": "暗恋对象"}
@@ -85,10 +89,12 @@ few_shot:
             "name": "老王",
             "aliases": [],
             "role_type": "SUPPORTING",
-            "gender": "男",
+            "gender": "MALE",
             "age_range": "22-25",
             "personality": ["热情", "大大咧咧"],
             "description": "林川的大学室友，性格开朗",
+            "appearance_count": 1,
+            "first_appearance_chapter": "第1章 穿越",
             "relationships": [
               {"target": "林川", "relation": "室友"}
             ]
@@ -97,10 +103,12 @@ few_shot:
             "name": "苏晴",
             "aliases": [],
             "role_type": "SUPPORTING",
-            "gender": "女",
+            "gender": "FEMALE",
             "age_range": "20-23",
             "personality": ["温柔", "善良", "内向"],
             "description": "林川的学妹，成绩优秀",
+            "appearance_count": 1,
+            "first_appearance_chapter": "第1章 穿越",
             "relationships": [
               {"target": "林川", "relation": "学长"}
             ]
@@ -122,10 +130,12 @@ output_schema:
         name: { type: string }
         aliases: { type: array, items: { type: string } }
         role_type: { type: string, enum: [PROTAGONIST, DEUTERAGONIST, ANTAGONIST, SUPPORTING, MINOR] }
-        gender: { type: string }
+        gender: { type: string, enum: [MALE, FEMALE, UNKNOWN] }
         age_range: { type: string }
         personality: { type: array, items: { type: string } }
         description: { type: string }
+        appearance_count: { type: integer, minimum: 1 }
+        first_appearance_chapter: { type: string }
         relationships:
           type: array
           items:
@@ -133,7 +143,7 @@ output_schema:
             properties:
               target: { type: string }
               relation: { type: string }
-      required: [name, role_type, description]
+      required: [name, role_type, description, gender, appearance_count]
 
 validation:
   rules:

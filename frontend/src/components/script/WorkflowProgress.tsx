@@ -36,17 +36,29 @@ export function WorkflowProgress({ progress }: WorkflowProgressProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between text-xs mb-1.5">
             <span className={`font-medium ${isActive ? 'text-teal-400' : 'text-muted-foreground'}`}>
-              {isActive ? 'AI 正在生成...' : '生成完成'}
+              {isActive ? 'AI 正在分析...' : '生成完成'}
             </span>
             <span className="text-muted-foreground font-mono tabular-nums">
               {Math.round(progress)}%
             </span>
           </div>
-          <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-white/5 rounded-full overflow-hidden relative">
+            {/* Indeterminate shimmer for active generation */}
+            {isActive && (
+              <div
+                className="absolute inset-0 rounded-full animate-shimmer"
+                style={{
+                  background:
+                    'linear-gradient(90deg, transparent 0%, oklch(0.72 0.14 185 / 0.15) 50%, transparent 100%)',
+                  backgroundSize: '200% 100%',
+                }}
+              />
+            )}
             <div
-              className="h-full rounded-full transition-all duration-700 ease-out"
+              className="h-full rounded-full transition-all duration-700 ease-out relative z-10"
               style={{
-                width: `${progress}%`,
+                width: `${Math.max(progress, isActive ? 2 : progress)}%`,
+                minWidth: isActive ? '8%' : '0%',
                 background:
                   'linear-gradient(90deg, oklch(0.72 0.14 185), oklch(0.65 0.16 200))',
                 boxShadow: isActive

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useScriptStore } from '@/stores/script-store';
-import { sceneHeader, cn } from '@/lib/utils';
+import { sceneHeader, sanitizeSceneHeading, formatTimeOfDay, cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { DialogueBlock } from './DialogueBlock';
 import { ActionBlock } from './ActionBlock';
@@ -616,12 +616,14 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
             <span className="flex items-center gap-1.5">
               <MapPin className="h-3 w-3" />
               <span className="truncate max-w-[240px]">
-                {scene.sceneHeading ?? sceneHeader(scene)}
+                {sanitizeSceneHeading(scene.sceneHeading ?? '') || sceneHeader(scene)}
               </span>
             </span>
+            {formatTimeOfDay(scene.timeOfDay) && (
             <span className="flex items-center gap-1.5">
-              <Clock className="h-3 w-3" /> {scene.timeOfDay}
+              <Clock className="h-3 w-3" /> {formatTimeOfDay(scene.timeOfDay)}
             </span>
+            )}
             <span className="flex items-center gap-1.5">
               <MessageSquare className="h-3 w-3" /> {scene.dialogues.length}
             </span>
