@@ -42,6 +42,9 @@ public class GenerationOrchestrator {
     /** Config: skip the single-pass generation attempt and go directly to multi-step. */
     private final boolean singlePassEnabled;
 
+    /** Config: use staged v2.0 mode (outline → dialogue/action fill). */
+    private final boolean singlePassStaged;
+
     // ── New single-pass agent (primary) ──
     private final ScriptGenerationAgent scriptGenerationAgent;
 
@@ -60,6 +63,7 @@ public class GenerationOrchestrator {
                                   NovelService novelService,
                                   AiModelRouter modelRouter,
                                   @org.springframework.beans.factory.annotation.Value("${script.generation.single-pass.enabled:false}") boolean singlePassEnabled,
+                                  @org.springframework.beans.factory.annotation.Value("${script.generation.single-pass.staged:true}") boolean singlePassStaged,
                                   ScriptGenerationAgent scriptGenerationAgent,
                                   CharacterAgent characterAgent,
                                   CharacterResolverAgent characterResolverAgent,
@@ -72,6 +76,7 @@ public class GenerationOrchestrator {
         this.novelService = novelService;
         this.modelRouter = modelRouter;
         this.singlePassEnabled = singlePassEnabled;
+        this.singlePassStaged = singlePassStaged;
         this.scriptGenerationAgent = scriptGenerationAgent;
         this.characterAgent = characterAgent;
         this.characterResolverAgent = characterResolverAgent;
@@ -80,7 +85,8 @@ public class GenerationOrchestrator {
         this.dialogueAgent = dialogueAgent;
         this.actionAgent = actionAgent;
         this.scriptComposer = scriptComposer;
-        log.info("GenerationOrchestrator: singlePassEnabled={}", singlePassEnabled);
+        log.info("GenerationOrchestrator: singlePassEnabled={}, singlePassStaged={}",
+                singlePassEnabled, singlePassStaged);
     }
 
     public void launchGeneration(Script script) {
@@ -138,35 +144,113 @@ public class GenerationOrchestrator {
             scriptService.updateProgress(scriptId, 10.0, WorkflowStep.SCRIPT_COMPOSE);
 
             try {
-                log.info("Calling ScriptGenerationAgent.generate() — single-pass narrative→script");
-                Script generated = scriptGenerationAgent.generate(chapters, novel.getTitle(), scriptId);
+                if (singlePassStaged) {
+                    // ── v2.0 Staged mode: outline first, then dialogue/action fill ──
+                    log.info("Calling ScriptGenerationAgent.generateOutline() — v2.0 staged: outline → dialogue fill");
+                    Script outline = scriptGenerationAgent.generateOutline(chapters, novel.getTitle(), scriptId, true);
 
-                if (generated != null && !generated.getScenes().isEmpty()
-                        && !generated.getCharacters().isEmpty()) {
-                    scriptService.updateProgress(scriptId, 80.0, WorkflowStep.SCRIPT_COMPOSE);
-                    script.setTitle(generated.getTitle());
-                    script.setCharacters(generated.getCharacters());
-                    script.setCharacterCount(generated.getCharacterCount());
-                    script.setScenes(generated.getScenes());
-                    script.setSceneCount(generated.getSceneCount());
-                    script.setDialogueCount(generated.getDialogueCount());
-                    script.setPlotEvents(new ArrayList<>());
-                    script.setVersion(1);
+                    if (outline != null && !outline.getScenes().isEmpty()
+                            && !outline.getCharacters().isEmpty()) {
 
-                    scriptService.updateCharacters(scriptId, generated.getCharacters());
-                    scriptService.updateScenes(scriptId, generated.getScenes());
-                    scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
-                    scriptService.completeScript(scriptId);
+                        // ── Phase 1 complete: immediately save characters + scene outlines ──
+                        scriptService.updateProgress(scriptId, 50.0, WorkflowStep.SCRIPT_COMPOSE);
+                        script.setTitle(outline.getTitle());
+                        script.setCharacters(outline.getCharacters());
+                        script.setCharacterCount(outline.getCharacterCount());
+                        script.setVersion(1);
 
-                    log.info("✅ Single-pass generation complete: {} characters, {} scenes, {} dialogues",
-                            generated.getCharacterCount(), generated.getSceneCount(),
-                            generated.getDialogueCount());
-                    return;
+                        // Ensure scenes have empty dialogue/action lists
+                        List<Scene> outlineScenes = outline.getScenes();
+                        for (Scene s : outlineScenes) {
+                            if (s.getDialogues() == null) s.setDialogues(new ArrayList<>());
+                            if (s.getActions() == null) s.setActions(new ArrayList<>());
+                        }
+                        script.setScenes(outlineScenes);
+                        script.setSceneCount(outlineScenes.size());
+                        script.setPlotEvents(new ArrayList<>());
+
+                        // ── IMMEDIATE SAVE: preserve outline even if dialogue fill fails ──
+                        scriptService.updateCharacters(scriptId, outline.getCharacters());
+                        scriptService.updateScenes(scriptId, outlineScenes);
+                        scriptService.updateProgress(scriptId, 55.0, WorkflowStep.SCRIPT_COMPOSE);
+
+                        log.info("✅ Phase 1 (outline) complete: {} characters, {} scene outlines — SAVED",
+                                outline.getCharacterCount(), outline.getSceneCount());
+
+                        // ── Phase 2: Fill dialogues & actions per scene (parallel, with fallback) ──
+                        scriptService.updateProgress(scriptId, 60.0, WorkflowStep.DIALOGUE_GENERATE);
+                        List<Scene> filledScenes = generateDialoguesWithFallback(
+                                outlineScenes, outline.getCharacters());
+                        scriptService.updateScenes(scriptId, filledScenes);
+                        scriptService.updateProgress(scriptId, 80.0, WorkflowStep.DIALOGUE_GENERATE);
+
+                        scriptService.updateProgress(scriptId, 85.0, WorkflowStep.ACTION_GENERATE);
+                        filledScenes = generateActionsWithFallback(filledScenes, outline.getCharacters(),
+                                filledScenes.stream().flatMap(s -> s.getDialogues().stream()).toList());
+                        scriptService.updateScenes(scriptId, filledScenes);
+                        scriptService.updateProgress(scriptId, 95.0, WorkflowStep.ACTION_GENERATE);
+
+                        // ── Complete ──
+                        script.setScenes(filledScenes);
+                        script.setDialogueCount(filledScenes.stream().mapToInt(s -> s.getDialogues().size()).sum());
+                        scriptService.updateScenes(scriptId, filledScenes);
+                        scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
+                        scriptService.completeScript(scriptId);
+
+                        log.info("✅ Staged generation complete: {} characters, {} scenes, {} dialogues",
+                                outline.getCharacterCount(), outline.getSceneCount(),
+                                script.getDialogueCount());
+                        return;
+                    }
+
+                    log.warn("Phase 1 (outline) generation returned insufficient data, falling back to multi-step...");
+                } else {
+                    // ── v1.0 legacy: full JSON generation in one call ──
+                    log.info("Calling ScriptGenerationAgent.generate() — v1.0 single-pass: full JSON");
+                    Script generated = scriptGenerationAgent.generate(chapters, novel.getTitle(), scriptId);
+
+                    if (generated != null && !generated.getScenes().isEmpty()
+                            && !generated.getCharacters().isEmpty()) {
+                        scriptService.updateProgress(scriptId, 80.0, WorkflowStep.SCRIPT_COMPOSE);
+                        script.setTitle(generated.getTitle());
+                        script.setCharacters(generated.getCharacters());
+                        script.setCharacterCount(generated.getCharacterCount());
+                        script.setScenes(generated.getScenes());
+                        script.setSceneCount(generated.getSceneCount());
+                        script.setDialogueCount(generated.getDialogueCount());
+                        script.setPlotEvents(new ArrayList<>());
+                        script.setVersion(1);
+
+                        scriptService.updateCharacters(scriptId, generated.getCharacters());
+                        scriptService.updateScenes(scriptId, generated.getScenes());
+                        scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
+                        scriptService.completeScript(scriptId);
+
+                        log.info("✅ Single-pass generation complete: {} characters, {} scenes, {} dialogues",
+                                generated.getCharacterCount(), generated.getSceneCount(),
+                                generated.getDialogueCount());
+                        return;
+                    }
+
+                    log.warn("Single-pass generation returned insufficient data, falling back to multi-step...");
                 }
-
-                log.warn("Single-pass generation returned insufficient data, falling back to multi-step...");
             } catch (Exception e) {
                 log.warn("Single-pass generation failed: {} — falling back to multi-step...", e.getMessage());
+
+                // ── PARTIAL SAVE: try to save whatever was generated before the error ──
+                try {
+                    Script partialScript = scriptService.findById(scriptId).orElse(null);
+                    if (partialScript != null && partialScript.getCharacters() != null
+                            && !partialScript.getCharacters().isEmpty()
+                            && partialScript.getScenes() != null
+                            && !partialScript.getScenes().isEmpty()) {
+                        log.info("Partial result preserved: {} characters, {} scene outlines — will fill with fallback",
+                                partialScript.getCharacters().size(), partialScript.getScenes().size());
+                        // Fall through to runMultiStepPipeline which will fill dialogues/actions as mock
+                    }
+                } catch (Exception ex) {
+                    log.debug("Could not check partial save state: {}", ex.getMessage());
+                }
             }
         } else {
             log.info("⏭️  Single-pass generation disabled (script.generation.single-pass.enabled=false), "
@@ -179,6 +263,9 @@ public class GenerationOrchestrator {
 
     /**
      * Legacy multi-step pipeline as fallback when single-pass fails.
+     * <p>
+     * If single-pass v2.0 (staged) already saved characters and scene outlines
+     * (partial result), this method skips directly to dialogue/action generation.
      */
     private void runMultiStepPipeline(Script script, Novel novel, List<Chapter> chapters) {
         Long scriptId = script.getId();
@@ -188,71 +275,84 @@ public class GenerationOrchestrator {
         List<String> focusCharacters = (List<String>) script.getWorkflowState()
                 .getOrDefault("focusCharacters", List.of());
 
-        printModelInfo(TaskType.CHARACTER_EXTRACTION, "角色提取（回退模式）");
-        printModelInfo(TaskType.SCENE_SEGMENT, "场景切分（回退模式）");
+        // ── PARTIAL RECOVERY: check if characters + scenes already saved from failed single-pass ──
+        List<Character> characters = script.getCharacters();
+        List<Scene> scenes = script.getScenes();
+        boolean hasPartialResult = characters != null && !characters.isEmpty()
+                && scenes != null && !scenes.isEmpty();
 
-        // Step 1: Character extraction
-        updateStep(script, WorkflowStep.CHARACTER_EXTRACT);
-        scriptService.updateProgress(scriptId, 15.0, WorkflowStep.CHARACTER_EXTRACT);
-        List<Character> characters;
-        List<CharacterExtractionResult> extractionResults = null;
-        String charError = null;
-        try {
-            extractionResults = characterAgent.extract(chapters, focusCharacters);
-        } catch (Exception e) {
-            charError = e.getMessage();
-        }
-        if (extractionResults == null || extractionResults.isEmpty()) {
-            String msg = charError != null ? "AI 角色提取失败: " + charError : "AI 无法识别角色，请检查 API Key";
-            log.error("❌ Pipeline FAILED: {}", msg);
-            scriptService.markFailed(scriptId);
-            script.getWorkflowState().put("error", msg);
-            return;
-        }
-        scriptService.updateProgress(scriptId, 25.0, WorkflowStep.CHARACTER_EXTRACT);
+        if (hasPartialResult) {
+            log.info("♻️  Partial recovery: {} characters and {} scene outlines already saved from single-pass attempt",
+                    characters.size(), scenes.size());
+            log.info("   Skipping character extraction and scene segmentation → generating dialogues/actions directly");
 
-        // Resolve characters
-        updateStep(script, WorkflowStep.CHARACTER_RESOLVE);
-        try {
-            characters = characterResolverAgent.resolve(extractionResults);
-        } catch (Exception e) {
-            characters = extractionResults.stream().map(CharacterExtractionResult::toDomainCharacter).toList();
-        }
-        AtomicInteger charIdSeq = new AtomicInteger((int)(scriptId * 1000));
-        for (Character c : characters) {
-            if (c.getId() == null) c.setId((long) charIdSeq.getAndIncrement());
-            c.setScriptId(scriptId);
-        }
-        scriptService.updateCharacters(scriptId, characters);
-        scriptService.updateProgress(scriptId, 35.0, WorkflowStep.CHARACTER_RESOLVE);
+            // Update progress to reflect we're starting from dialogue generation
+            scriptService.updateProgress(scriptId, 60.0, WorkflowStep.DIALOGUE_GENERATE);
+        } else {
+            printModelInfo(TaskType.CHARACTER_EXTRACTION, "角色提取（回退模式）");
+            printModelInfo(TaskType.SCENE_SEGMENT, "场景切分（回退模式）");
 
-        // Scene segmentation
-        updateStep(script, WorkflowStep.SCENE_SEGMENT);
-        scriptService.updateProgress(scriptId, 45.0, WorkflowStep.SCENE_SEGMENT);
-        List<Scene> scenes;
-        String sceneError = null;
-        try {
-            scenes = sceneAgent.segment(chapters, new ArrayList<>(), characters);
-        } catch (Exception e) {
-            sceneError = e.getMessage();
-            scenes = null;
+            // Step 1: Character extraction
+            updateStep(script, WorkflowStep.CHARACTER_EXTRACT);
+            scriptService.updateProgress(scriptId, 15.0, WorkflowStep.CHARACTER_EXTRACT);
+            List<CharacterExtractionResult> extractionResults = null;
+            String charError = null;
+            try {
+                extractionResults = characterAgent.extract(chapters, focusCharacters);
+            } catch (Exception e) {
+                charError = e.getMessage();
+            }
+            if (extractionResults == null || extractionResults.isEmpty()) {
+                String msg = charError != null ? "AI 角色提取失败: " + charError : "AI 无法识别角色，请检查 API Key";
+                log.error("❌ Pipeline FAILED: {}", msg);
+                scriptService.markFailed(scriptId);
+                script.getWorkflowState().put("error", msg);
+                return;
+            }
+            scriptService.updateProgress(scriptId, 25.0, WorkflowStep.CHARACTER_EXTRACT);
+
+            // Resolve characters
+            updateStep(script, WorkflowStep.CHARACTER_RESOLVE);
+            try {
+                characters = characterResolverAgent.resolve(extractionResults);
+            } catch (Exception e) {
+                characters = extractionResults.stream().map(CharacterExtractionResult::toDomainCharacter).toList();
+            }
+            AtomicInteger charIdSeq = new AtomicInteger((int)(scriptId * 1000));
+            for (Character c : characters) {
+                if (c.getId() == null) c.setId((long) charIdSeq.getAndIncrement());
+                c.setScriptId(scriptId);
+            }
+            scriptService.updateCharacters(scriptId, characters);
+            scriptService.updateProgress(scriptId, 35.0, WorkflowStep.CHARACTER_RESOLVE);
+
+            // Scene segmentation
+            updateStep(script, WorkflowStep.SCENE_SEGMENT);
+            scriptService.updateProgress(scriptId, 45.0, WorkflowStep.SCENE_SEGMENT);
+            String sceneError = null;
+            try {
+                scenes = sceneAgent.segment(chapters, new ArrayList<>(), characters);
+            } catch (Exception e) {
+                sceneError = e.getMessage();
+                scenes = null;
+            }
+            if (scenes == null || scenes.isEmpty()) {
+                String msg = sceneError != null ? "AI 场景切分失败: " + sceneError : "AI 无法切分场景，请检查 API Key";
+                log.error("❌ Pipeline FAILED: {}", msg);
+                scriptService.markFailed(scriptId);
+                script.getWorkflowState().put("error", msg);
+                return;
+            }
+            AtomicInteger sceneIdSeq = new AtomicInteger((int)(scriptId * 1000 + 100));
+            for (Scene s : scenes) {
+                if (s.getId() == null) s.setId((long) sceneIdSeq.getAndIncrement());
+                s.setScriptId(scriptId);
+                if (s.getDialogues() == null) s.setDialogues(new ArrayList<>());
+                if (s.getActions() == null) s.setActions(new ArrayList<>());
+            }
+            scriptService.updateScenes(scriptId, scenes);
+            scriptService.updateProgress(scriptId, 60.0, WorkflowStep.SCENE_SEGMENT);
         }
-        if (scenes == null || scenes.isEmpty()) {
-            String msg = sceneError != null ? "AI 场景切分失败: " + sceneError : "AI 无法切分场景，请检查 API Key";
-            log.error("❌ Pipeline FAILED: {}", msg);
-            scriptService.markFailed(scriptId);
-            script.getWorkflowState().put("error", msg);
-            return;
-        }
-        AtomicInteger sceneIdSeq = new AtomicInteger((int)(scriptId * 1000 + 100));
-        for (Scene s : scenes) {
-            if (s.getId() == null) s.setId((long) sceneIdSeq.getAndIncrement());
-            s.setScriptId(scriptId);
-            if (s.getDialogues() == null) s.setDialogues(new ArrayList<>());
-            if (s.getActions() == null) s.setActions(new ArrayList<>());
-        }
-        scriptService.updateScenes(scriptId, scenes);
-        scriptService.updateProgress(scriptId, 60.0, WorkflowStep.SCENE_SEGMENT);
 
         // Dialogue generation — try AI first, fallback to speech-action extraction, then mock
         updateStep(script, WorkflowStep.DIALOGUE_GENERATE);
