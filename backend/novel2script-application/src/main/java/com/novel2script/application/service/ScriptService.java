@@ -1,5 +1,6 @@
 package com.novel2script.application.service;
 
+import com.novel2script.common.enums.CharacterRoleType;
 import com.novel2script.common.enums.Emotion;
 import com.novel2script.common.enums.ScriptStatus;
 import com.novel2script.common.enums.WorkflowStep;
@@ -339,6 +340,87 @@ public class ScriptService {
         }
         script.setUpdatedAt(LocalDateTime.now());
         log.info("Scene content reordered: scriptId={}, sceneId={}, items={}", scriptId, sceneId, items.size());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void updateCharacter(Long scriptId, Long characterId, Map<String, Object> updates) {
+        Script script = store.get(scriptId);
+        if (script == null) throw new IllegalArgumentException("剧本不存在: id=" + scriptId);
+
+        Character character = script.getCharacters().stream()
+                .filter(c -> c.getId().equals(characterId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("角色不存在: characterId=" + characterId));
+
+        // Snapshot old canonical name before mutation (for speaker propagation)
+        String oldName = character.getCanonicalName();
+
+        if (updates.containsKey("canonicalName"))
+            character.setCanonicalName((String) updates.get("canonicalName"));
+        if (updates.containsKey("roleType")) {
+            String roleStr = (String) updates.get("roleType");
+            character.setRoleType(CharacterRoleType.fromValue(roleStr));
+        }
+        if (updates.containsKey("gender"))
+            character.setGender((String) updates.get("gender"));
+        if (updates.containsKey("ageRange"))
+            character.setAgeRange((String) updates.get("ageRange"));
+        if (updates.containsKey("description"))
+            character.setDescription((String) updates.get("description"));
+        if (updates.containsKey("aliases")) {
+            Object aliasesObj = updates.get("aliases");
+            if (aliasesObj instanceof List) {
+                character.setAliases((List<String>) aliasesObj);
+            }
+        }
+        if (updates.containsKey("personality")) {
+            Object personalityObj = updates.get("personality");
+            if (personalityObj instanceof List) {
+                character.setPersonality((List<String>) personalityObj);
+            }
+        }
+        if (updates.containsKey("relationships")) {
+            Object relsObj = updates.get("relationships");
+            if (relsObj instanceof List) {
+                List<Map<String, String>> rawRels = (List<Map<String, String>>) relsObj;
+                List<Character.Relationship> relationships = new ArrayList<>();
+                for (Map<String, String> r : rawRels) {
+                    relationships.add(Character.Relationship.builder()
+                            .target(r.get("target"))
+                            .relation(r.get("relation"))
+                            .build());
+                }
+                character.setRelationships(relationships);
+            }
+        }
+
+        // Propagate canonical name change to dialogue speaker fields
+        String newName = character.getCanonicalName();
+        if (oldName != null && !oldName.equals(newName)) {
+            int updatedCount = 0;
+            for (Scene scene : script.getScenes()) {
+                for (Dialogue dialogue : scene.getDialogues()) {
+                    // Match by characterId (precise) or by speaker name (fallback)
+                    if (dialogue.getCharacterId() != null
+                            && dialogue.getCharacterId().equals(characterId)) {
+                        dialogue.setSpeaker(newName);
+                        updatedCount++;
+                    } else if (oldName.equals(dialogue.getSpeaker())) {
+                        dialogue.setSpeaker(newName);
+                        updatedCount++;
+                    }
+                }
+            }
+            log.info("Character name changed: '{}' -> '{}', synced {} dialogue(s)",
+                    oldName, newName, updatedCount);
+        }
+
+        // Invalidate YAML cache so it regenerates with updated data
+        script.setYamlContent(null);
+
+        script.setUpdatedAt(LocalDateTime.now());
+        log.info("Character updated: scriptId={}, characterId={}, fields={}",
+                scriptId, characterId, updates.keySet());
     }
 
     public void updateYaml(Long scriptId, String yamlContent) {
