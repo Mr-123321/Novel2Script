@@ -26,6 +26,14 @@ Demo.md
 backend/error.txt
 temp_repo/
 
+# Video / Large media (use GitHub Releases instead)
+*.mp4
+*.mov
+*.avi
+*.webm
+*.mkv
+*.gif
+
 # OS
 .DS_Store
 Thumbs.db
