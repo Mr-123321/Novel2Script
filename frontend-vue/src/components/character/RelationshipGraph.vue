@@ -145,6 +145,7 @@ const relColorMap: Record<string, string> = {
 }
 
 function getRelColor(relation: string): string {
+  if (!relation) return '#787066'
   for (const [key, color] of Object.entries(relColorMap)) {
     if (relation.includes(key)) return color
   }
@@ -179,9 +180,11 @@ const edges = computed<GraphEdge[]>(() => {
   for (const char of props.characters) {
     const source = nodeMap.get(char.id)
     if (!source) continue
-    for (const rel of char.relationships) {
+    const rels = char.relationships ?? []
+    for (const rel of rels) {
+      if (!rel?.target || !rel?.relation) continue
       const target = props.characters.find((c) =>
-        c.canonicalName === rel.target || c.aliases.includes(rel.target)
+        c.canonicalName === rel.target || (c.aliases ?? []).includes(rel.target)
       )
       if (!target) continue
       const targetNode = nodeMap.get(target.id)

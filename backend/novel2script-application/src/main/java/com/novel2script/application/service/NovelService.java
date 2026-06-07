@@ -1,38 +1,40 @@
 package com.novel2script.application.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.novel2script.application.parser.NovelReader;
 import com.novel2script.common.enums.NovelStatus;
 import com.novel2script.common.exception.BusinessException;
 import com.novel2script.domain.model.Chapter;
 import com.novel2script.domain.model.Novel;
+import com.novel2script.infrastructure.mapper.ChapterMapper;
+import com.novel2script.infrastructure.mapper.NovelMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * Application service for novel upload and management.
- * Uses in-memory storage as a development fallback.
+ * Uses MyBatis-Plus for database persistence.
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class NovelService {
 
-    private final Map<Long, Novel> store = new ConcurrentHashMap<>();
-    private final AtomicLong idGenerator = new AtomicLong(1);
+    private final NovelMapper novelMapper;
+    private final ChapterMapper chapterMapper;
     private final NovelReader novelReader;
-
-    public NovelService(NovelReader novelReader) {
-        this.novelReader = novelReader;
-    }
 
     /**
      * Upload and register a novel from raw content.
-     * Parses chapters from the content and stores them in the Novel.
+     * Parses chapters from the content and stores them in the database.
      */
+    @Transactional
     public Novel uploadNovel(String title, String author, String fileName,
                              long fileSize, String rawContent) {
         log.info("Uploading novel: title='{}', author='{}', fileSize={}", title, author, fileSize);
@@ -49,10 +51,9 @@ public class NovelService {
         // ── Content sanitization ──────────────────────────
         String sanitized = sanitizeContent(rawContent);
 
-        Long id = idGenerator.getAndIncrement();
         LocalDateTime now = LocalDateTime.now();
 
-        // Parse chapters from sanitized content using ChapterParser
+        // Parse chapters from sanitized content
         List<Chapter> chapters;
         try {
             chapters = novelReader.parseChapters(sanitized);
@@ -76,33 +77,47 @@ public class NovelService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("rawContent", sanitized);
 
+        // Insert novel
         Novel novel = Novel.builder()
-                .id(id)
                 .title(title)
                 .author(author)
                 .fileName(fileName)
                 .fileSize(fileSize)
                 .totalChars(totalChars)
                 .chapterCount(chapters.size())
-                .chapters(chapters)
                 .metadata(metadata)
                 .status(NovelStatus.PARSED)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
 
-        store.put(id, novel);
+        int inserted = novelMapper.insert(novel);
+        if (inserted <= 0) {
+            throw new BusinessException("DB_ERROR", "Failed to insert novel record");
+        }
+
+        // Insert chapters with the generated novel ID
+        for (Chapter chapter : chapters) {
+            chapter.setNovelId(novel.getId());
+            chapter.setCreatedAt(now);
+            chapterMapper.insert(chapter);
+        }
+
+        novel.setChapters(chapters);
         log.info("Novel registered: id={}, title='{}', chapters={}, chars={}",
                 novel.getId(), novel.getTitle(), chapters.size(), totalChars);
         return novel;
     }
 
     /**
-     * Find a novel by its ID.
+     * Find a novel by its ID, including its chapters.
      */
     public Optional<Novel> findById(Long novelId) {
-        Novel novel = store.get(novelId);
+        Novel novel = novelMapper.selectById(novelId);
         if (novel != null) {
+            List<Chapter> chapters = chapterMapper.selectList(
+                    new LambdaQueryWrapper<Chapter>().eq(Chapter::getNovelId, novelId));
+            novel.setChapters(chapters);
             log.debug("Found novel: id={}, title='{}'", novelId, novel.getTitle());
             return Optional.of(novel);
         }
@@ -111,57 +126,59 @@ public class NovelService {
     }
 
     /**
-     * List all novels.
+     * List all novels (without chapters for performance).
      */
     public List<Novel> listAll() {
-        return new ArrayList<>(store.values());
+        LambdaQueryWrapper<Novel> query = new LambdaQueryWrapper<>();
+        query.orderByDesc(Novel::getCreatedAt);
+        return novelMapper.selectList(query);
     }
 
     /**
      * Delete a novel and all related data.
+     * Cascade deletes are handled by database foreign keys.
      */
+    @Transactional
     public void deleteNovel(Long novelId) {
-        Novel removed = store.remove(novelId);
-        if (removed != null) {
-            log.info("Deleted novel: id={}, title='{}'", novelId, removed.getTitle());
-        } else {
+        Novel novel = novelMapper.selectById(novelId);
+        if (novel == null) {
             log.warn("Novel not found for deletion: id={}", novelId);
+            throw new BusinessException("NOVEL_NOT_FOUND", "Novel not found: id=" + novelId);
+        }
+        // DB cascade handles chapters, scripts, etc.
+        int deleted = novelMapper.deleteById(novelId);
+        if (deleted > 0) {
+            log.info("Deleted novel: id={}, title='{}'", novelId, novel.getTitle());
         }
     }
 
     /**
      * Update novel status.
      */
+    @Transactional
     public void updateStatus(Long novelId, NovelStatus status) {
-        Novel novel = store.get(novelId);
-        if (novel != null) {
-            novel.setStatus(status);
-            novel.setUpdatedAt(LocalDateTime.now());
-            log.info("Updated novel status: id={}, status={}", novelId, status);
-        } else {
+        Novel novel = novelMapper.selectById(novelId);
+        if (novel == null) {
             log.warn("Novel not found for status update: id={}", novelId);
+            return;
         }
+        novel.setStatus(status);
+        novel.setUpdatedAt(LocalDateTime.now());
+        novelMapper.updateById(novel);
+        log.info("Updated novel status: id={}, status={}", novelId, status);
     }
 
     // ── Encoding diagnostics & sanitization ──────────────
 
-    /**
-     * Log encoding diagnostics for the uploaded content.
-     * Helps identify encoding issues before content reaches AI agents.
-     */
     private void logContentDiagnostics(String content) {
-        // Content preview (first 200 chars)
         String preview = content.length() > 200 ? content.substring(0, 200) + "…" : content;
         log.info("Content preview (first 200 chars):\n{}", preview);
 
-        // Check for replacement characters (U+FFFD) — definitive sign of bad decode
         long replacementChars = content.chars().filter(c -> c == '�').count();
         if (replacementChars > 0) {
             log.warn("⚠️  Content contains {} Unicode replacement characters (U+FFFD) — encoding issue!", replacementChars);
         }
 
-        // Check for common GBK-garbled-as-UTF8 patterns
-        // When GBK text is decoded as UTF-8, many Chinese chars become Latin-1 supplement chars
         int sampleSize = Math.min(content.length(), 2000);
         int latinSuppCount = 0;
         int cjkCount = 0;
@@ -174,16 +191,13 @@ public class NovelService {
         double cjkRatio = (double) cjkCount / sampleSize;
 
         if (latinRatio > 0.10 && cjkRatio < 0.02 && replacementChars == 0) {
-            log.warn("⚠️  Content: {:.1f}% Latin-1 supplement, {:.1f}% CJK — "
-                    + "likely GBK text incorrectly decoded as UTF-8! "
-                    + "AI dialogue generation may produce garbled output.",
+            log.warn("⚠️  Content: {:.1f}% Latin-1 supplement, {:.1f}% CJK — likely GBK incorrectly decoded as UTF-8!",
                     latinRatio * 100, cjkRatio * 100);
         } else if (cjkRatio > 0.05) {
             log.info("✅ Content encoding looks healthy: {:.1f}% CJK characters, {} replacement chars",
                     cjkRatio * 100, replacementChars);
         }
 
-        // Frequency analysis for unusual character clusters (garbled text pattern)
         Map<Character, Integer> freq = new LinkedHashMap<>();
         for (int i = 0; i < sampleSize; i++) {
             char c = content.charAt(i);
@@ -191,52 +205,36 @@ public class NovelService {
                 freq.merge(c, 1, Integer::sum);
             }
         }
-        // If any single Latin-1 char appears >5% of the time, it's likely garbled
         for (Map.Entry<Character, Integer> e : freq.entrySet()) {
             if ((double) e.getValue() / sampleSize > 0.05) {
                 log.warn("⚠️  Character '{}' (U+{:04X}) appears {} times ({:.1f}%) — garbled text indicator",
                         e.getKey(), (int) e.getKey(), e.getValue(),
                         (double) e.getValue() / sampleSize * 100);
-                break; // report only the first anomaly
+                break;
             }
         }
     }
 
-    /**
-     * Sanitize content before storage and AI processing.
-     * Handles common encoding artifacts and normalizes whitespace.
-     *
-     * <p>Operations:
-     * <ul>
-     *   <li>Remove null bytes and BOM</li>
-     *   <li>Normalize Unicode private-use characters</li>
-     *   <li>Replace common garbled character sequences</li>
-     *   <li>Normalize line endings to \n</li>
-     * </ul>
-     */
     private String sanitizeContent(String content) {
         if (content == null || content.isEmpty()) return content;
 
         String sanitized = content;
 
-        // 1. Remove BOM (Byte Order Mark) and null bytes
-        sanitized = sanitized.replace("﻿", "")
-                .replace(" ", "");
+        // 1. Remove BOM and null bytes
+        sanitized = sanitized.replace("﻿", "").replace(" ", "");
 
-        // 2. Normalize line endings: \r\n → \n, standalone \r → \n
-        sanitized = sanitized.replace("\r\n", "\n")
-                .replace("\r", "\n");
+        // 2. Normalize line endings
+        sanitized = sanitized.replace("\r\n", "\n").replace("\r", "\n");
 
-        // 3. Collapse 3+ consecutive blank lines into 2
+        // 3. Collapse excessive blank lines
         sanitized = sanitized.replaceAll("\\n{4,}", "\n\n\n");
 
-        // 4. Replace Unicode private-use area characters (often encoding artifacts)
+        // 4. Replace Unicode private-use area characters
         StringBuilder cleaned = new StringBuilder(sanitized.length());
         int replaced = 0;
         for (int i = 0; i < sanitized.length(); i++) {
             char c = sanitized.charAt(i);
             if (c >= '' && c <= '') {
-                // Private Use Area — likely encoding artifact, replace with space
                 cleaned.append(' ');
                 replaced++;
             } else {

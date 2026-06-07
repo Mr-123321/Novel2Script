@@ -18,6 +18,30 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
+
+  # Flyway 数据库迁移
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    encoding: UTF-8
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    # 下划线转驼峰: novel_id -> novelId
+    map-underscore-to-camel-case: true
+    # SQL 日志（DEBUG 级别可通过 logging.level 控制）
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      # 主键类型: AUTO = 数据库自增
+      id-type: auto
+      # 逻辑删除（暂未启用）
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+    banner: false
   ai:
     # 默认使用的 AI 提供商（必须在 providers 中配置）
     default-provider: deepseek
@@ -71,7 +95,7 @@ script:
       # 是否启用单次 AI 调用生成完整剧本
       # false = 跳过（直接使用多步流水线），避免浪费 ~90s 等待必然失败的调用
       # true  = 先尝试单次生成，失败后回退多步流水线
-      enabled: true
+      enabled: false
       # 单次生成专用 max_tokens（覆盖 provider 默认的 4096）
       # 16384 tokens 足够 5-10 章的剧本大纲（v2.0 简化输出）
       max-tokens: 16384

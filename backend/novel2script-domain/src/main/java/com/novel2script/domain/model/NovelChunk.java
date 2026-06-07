@@ -1,6 +1,10 @@
 package com.novel2script.domain.model;
 
+import com.novel2script.domain.handler.LongListTypeHandler;
 import lombok.Builder;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.util.List;
 
@@ -11,20 +15,16 @@ import java.util.List;
  * Each chunk carries enough context to be independently analyzable by
  * AI models, with overlap to prevent information loss at boundaries.
  *
- * @param chunkId      unique identifier (UUID)
- * @param chunkIndex   sequential index within the novel
- * @param novelId      parent novel ID
- * @param chapterIds   source chapter IDs this chunk spans
- * @param content      the chunk text (~2000 tokens)
- * @param tokenCount   estimated token count
- * @param startOffset  byte offset in source file
- * @param endOffset    byte offset in source file
+ * <p>Note: This is a record class. MyBatis-Plus annotation support for
+ * records is limited; this entity is primarily used through manual
+ * mapper XML rather than automatic CRUD.
  */
 @Builder
 public record NovelChunk(
         String chunkId,
         int chunkIndex,
         Long novelId,
+        @TableField(typeHandler = LongListTypeHandler.class)
         List<Long> chapterIds,
         String content,
         int tokenCount,

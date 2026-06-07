@@ -1,5 +1,10 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.novel2script.domain.handler.LongListTypeHandler;
 import com.novel2script.common.enums.SourceReason;
 import com.novel2script.common.enums.TimeOfDay;
 import lombok.AllArgsConstructor;
@@ -21,28 +26,56 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName(value = "scenes", autoResultMap = true)
 public class Scene {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
+    @TableField("script_id")
     private Long scriptId;
+
+    @TableField("scene_number")
     private int sceneNumber;
+
     private String title;
     private String location;
+
+    @TableField("time_of_day")
     private TimeOfDay timeOfDay;
-    private boolean interior;    // true = INT (interior), false = EXT (exterior)
+
+    /** TINYINT(1): 1=INT, 0=EXT */
+    @TableField("is_interior")
+    private boolean interior;
+
     private String summary;
     private String mood;
-    private List<Long> chapterIds;
-    private List<Long> characterIds;
+
+    @TableField(value = "chapter_ids", typeHandler = LongListTypeHandler.class)
+    @Builder.Default
+    private List<Long> chapterIds = new ArrayList<>();
+
+    @TableField(value = "character_ids", typeHandler = LongListTypeHandler.class)
+    @Builder.Default
+    private List<Long> characterIds = new ArrayList<>();
+
+    @TableField("source_reason")
     private SourceReason sourceReason;
+
+    @TableField("scene_heading")
     private String sceneHeading;
 
+    /** Dialogues are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<Dialogue> dialogues = new ArrayList<>();
 
+    /** Actions are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<Action> actions = new ArrayList<>();
 
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     /**

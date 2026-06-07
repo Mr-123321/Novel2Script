@@ -7,9 +7,9 @@
       </div>
       <div class="card-names">
         <h3 class="card-name">{{ character.canonicalName }}</h3>
-        <p v-if="character.aliases.length > 0" class="card-aliases">
-          {{ character.aliases.slice(0, 2).join('、') }}
-          <span v-if="character.aliases.length > 2">+{{ character.aliases.length - 2 }}</span>
+        <p v-if="(character.aliases?.length ?? 0) > 0" class="card-aliases">
+          {{ character.aliases!.slice(0, 2).join('、') }}
+          <span v-if="(character.aliases?.length ?? 0) > 2">+{{ character.aliases!.length - 2 }}</span>
         </p>
       </div>
       <span class="role-badge" :class="'role-' + character.roleType.toLowerCase()">
@@ -26,20 +26,20 @@
         {{ genderInfo.icon }} {{ genderInfo.label }}
       </span>
       <span class="stat"># 出场 {{ character.appearanceCount }} 次</span>
-      <span v-if="character.relationships.length > 0" class="stat">
-        👥 {{ character.relationships.length }} 关系
+      <span v-if="(character.relationships?.length ?? 0) > 0" class="stat">
+        👥 {{ character.relationships!.length }} 关系
       </span>
     </div>
 
     <!-- Personality traits -->
-    <div v-if="character.personality.length > 0" class="card-traits">
+    <div v-if="(character.personality?.length ?? 0) > 0" class="card-traits">
       <span
-        v-for="(trait, i) in character.personality.slice(0, 3)"
+        v-for="(trait, i) in character.personality!.slice(0, 3)"
         :key="i"
         class="trait-chip"
       >{{ trait }}</span>
-      <span v-if="character.personality.length > 3" class="trait-more">
-        +{{ character.personality.length - 3 }}
+      <span v-if="(character.personality?.length ?? 0) > 3" class="trait-more">
+        +{{ character.personality!.length - 3 }}
       </span>
     </div>
   </button>

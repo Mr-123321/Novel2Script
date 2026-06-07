@@ -172,14 +172,14 @@ function addAlias(input: HTMLInputElement) {
   const val = input.value.trim()
   if (val) {
     store.updateCharacter(props.character.id, {
-      aliases: [...props.character.aliases, val],
+      aliases: [...(props.character.aliases ?? []), val],
     })
     input.value = ''
   }
 }
 
 function removeAlias(idx: number) {
-  const aliases = [...props.character.aliases]
+  const aliases = [...(props.character.aliases ?? [])]
   aliases.splice(idx, 1)
   store.updateCharacter(props.character.id, { aliases })
 }
@@ -188,33 +188,33 @@ function addTrait(input: HTMLInputElement) {
   const val = input.value.trim()
   if (val) {
     store.updateCharacter(props.character.id, {
-      personality: [...props.character.personality, val],
+      personality: [...(props.character.personality ?? []), val],
     })
     input.value = ''
   }
 }
 
 function removeTrait(idx: number) {
-  const personality = [...props.character.personality]
+  const personality = [...(props.character.personality ?? [])]
   personality.splice(idx, 1)
   store.updateCharacter(props.character.id, { personality })
 }
 
 function addRelationship() {
   store.updateCharacter(props.character.id, {
-    relationships: [...props.character.relationships, { target: '', relation: '' }],
+    relationships: [...(props.character.relationships ?? []), { target: '', relation: '' }],
   })
 }
 
 function updateRelationship(idx: number, field: string, value: string) {
-  const relationships = props.character.relationships.map((r, i) =>
+  const relationships = (props.character.relationships ?? []).map((r, i) =>
     i === idx ? { ...r, [field]: value } : r
   )
   store.updateCharacter(props.character.id, { relationships })
 }
 
 function removeRelationship(idx: number) {
-  const relationships = [...props.character.relationships]
+  const relationships = [...(props.character.relationships ?? [])]
   relationships.splice(idx, 1)
   store.updateCharacter(props.character.id, { relationships })
 }

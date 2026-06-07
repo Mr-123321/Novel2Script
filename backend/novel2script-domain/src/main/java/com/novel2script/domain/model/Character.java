@@ -1,5 +1,12 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.novel2script.domain.handler.LongListTypeHandler;
+import com.novel2script.domain.handler.RelationshipListTypeHandler;
+import com.novel2script.domain.handler.StringListTypeHandler;
 import com.novel2script.common.enums.CharacterRoleType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,24 +24,58 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName(value = "characters", autoResultMap = true)
 public class Character {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
-    private Long scriptId;
-    private String canonicalName;
-    private List<String> aliases;
-    private CharacterRoleType roleType;
-    private String gender;       // MALE / FEMALE / UNKNOWN
-    private String ageRange;
-    private String description;
-    private List<String> personality;
-    private List<Relationship> relationships;
-    private int appearanceCount;
-    private Long firstAppearance;
-    private String embeddingId;
-    private boolean resolved;
-    private List<Long> mergedFrom;
 
+    @TableField("script_id")
+    private Long scriptId;
+
+    @TableField("canonical_name")
+    private String canonicalName;
+
+    @TableField(typeHandler = StringListTypeHandler.class)
+    @Builder.Default
+    private List<String> aliases = new ArrayList<>();
+
+    @TableField("role_type")
+    private CharacterRoleType roleType;
+
+    private String gender;       // MALE / FEMALE / UNKNOWN
+
+    @TableField("age_range")
+    private String ageRange;
+
+    private String description;
+
+    @TableField(typeHandler = StringListTypeHandler.class)
+    @Builder.Default
+    private List<String> personality = new ArrayList<>();
+
+    @TableField(typeHandler = RelationshipListTypeHandler.class)
+    @Builder.Default
+    private List<Relationship> relationships = new ArrayList<>();
+
+    @TableField("appearance_count")
+    private int appearanceCount;
+
+    @TableField("first_appearance")
+    private Long firstAppearance;
+
+    @TableField("embedding_id")
+    private String embeddingId;
+
+    /** Maps to TINYINT(1) is_resolved column */
+    @TableField("is_resolved")
+    private boolean resolved;
+
+    @TableField(value = "merged_from", typeHandler = LongListTypeHandler.class)
+    @Builder.Default
+    private List<Long> mergedFrom = new ArrayList<>();
+
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     /**
