@@ -1,5 +1,9 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,18 +18,36 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName("shots")
 public class Storyboard {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
-    private Long sceneId;
-    private int shotNumber;
-    private String camera;       // WIDE / MEDIUM / CLOSE_UP / EXTREME_CU / POV / ...
-    private String angle;        // EYE_LEVEL / HIGH_ANGLE / LOW_ANGLE / DUTCH / ...
-    private Double durationSec;  // duration in seconds
-    private String description;
-    private String movement;     // STATIC / PAN / TILT / DOLLY / ZOOM / ...
-    private String transition;   // CUT / DISSOLVE / FADE / WIPE
 
+    @TableField("scene_id")
+    private Long sceneId;
+
+    @TableField("shot_number")
+    private int shotNumber;
+
+    /** WIDE / MEDIUM / CLOSE_UP / EXTREME_CU / POV / ... */
+    private String camera;
+
+    /** EYE_LEVEL / HIGH_ANGLE / LOW_ANGLE / DUTCH / ... */
+    private String angle;
+
+    @TableField("duration_sec")
+    private Double durationSec;
+
+    private String description;
+
+    /** STATIC / PAN / TILT / DOLLY / ZOOM / ... */
+    private String movement;
+
+    /** CUT / DISSOLVE / FADE / WIPE */
+    private String transition;
+
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     public String getShotLabel() {

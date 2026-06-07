@@ -1,5 +1,9 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,9 +23,13 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName("plot_insertions")
 public class PlotInsertion {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
+    @TableField("script_id")
     private Long scriptId;
 
     /** The markdown-formatted plot text to display */
@@ -35,8 +43,12 @@ public class PlotInsertion {
 
     /** Who created this insertion */
     @Builder.Default
+    @TableField("inserted_by")
     private String insertedBy = "user";
 
+    @TableField("created_at")
     private LocalDateTime createdAt;
+
+    @TableField("updated_at")
     private LocalDateTime updatedAt;
 }

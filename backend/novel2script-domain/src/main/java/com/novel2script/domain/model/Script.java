@@ -1,5 +1,10 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.novel2script.common.enums.ScriptStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,33 +24,61 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName(value = "scripts", autoResultMap = true)
 public class Script {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
+    @TableField("novel_id")
     private Long novelId;
+
     private String title;
     private int version;
+
+    @TableField("scene_count")
     private int sceneCount;
+
+    @TableField("character_count")
     private int characterCount;
+
+    @TableField("dialogue_count")
     private int dialogueCount;
+
+    @TableField("yaml_content")
     private String yamlContent;
+
     private ScriptStatus status;
     private double progress;       // 0.00 - 100.00
-    private Map<String, Object> workflowState;
 
+    @TableField(value = "workflow_state", typeHandler = JacksonTypeHandler.class)
+    @Builder.Default
+    private Map<String, Object> workflowState = new LinkedHashMap<>();
+
+    /** Characters are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<Character> characters = new ArrayList<>();
 
+    /** Scenes are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<Scene> scenes = new ArrayList<>();
 
+    /** Plot events are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<PlotEvent> plotEvents = new ArrayList<>();
 
+    /** Plot insertions are stored in their own table */
+    @TableField(exist = false)
     @Builder.Default
     private List<PlotInsertion> plotInsertions = new ArrayList<>();
 
+    @TableField("created_at")
     private LocalDateTime createdAt;
+
+    @TableField("updated_at")
     private LocalDateTime updatedAt;
 
     // --- Domain logic ---

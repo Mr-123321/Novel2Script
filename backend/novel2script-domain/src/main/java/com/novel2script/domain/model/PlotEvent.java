@@ -1,5 +1,10 @@
 package com.novel2script.domain.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.novel2script.domain.handler.LongListTypeHandler;
 import com.novel2script.common.enums.ConflictType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,21 +25,44 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@TableName(value = "plot_events", autoResultMap = true)
 public class PlotEvent {
 
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
+    @TableField("script_id")
     private Long scriptId;
+
+    @TableField("event_order")
     private int eventOrder;
+
     private String title;
     private String description;
     private String location;
-    private String timePoint;
-    private ConflictType conflictType;
-    private List<Long> chapterIds;
-    private List<Long> characterIds;
-    private int importance;        // 1-5
-    private String emotionalArc;   // ↑(上升) / ↓(下降) / →(平) / ↗(缓升) / ↘(缓降)
 
+    @TableField("time_point")
+    private String timePoint;
+
+    @TableField("conflict_type")
+    private ConflictType conflictType;
+
+    @TableField(value = "chapter_ids", typeHandler = LongListTypeHandler.class)
+    @Builder.Default
+    private List<Long> chapterIds = new ArrayList<>();
+
+    @TableField(value = "character_ids", typeHandler = LongListTypeHandler.class)
+    @Builder.Default
+    private List<Long> characterIds = new ArrayList<>();
+
+    /** 1-5 */
+    private int importance;
+
+    /** ↑(上升) / ↓(下降) / →(平) / ↗(缓升) / ↘(缓降) */
+    @TableField("emotional_arc")
+    private String emotionalArc;
+
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     // ── Domain logic ────────────────────────────────────
