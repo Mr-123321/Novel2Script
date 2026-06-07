@@ -10,6 +10,8 @@
 >
 > 夸克网盘地址https://pan.quark.cn/s/6e733d6fab63
 
+Novel2Script YAML Schema 设计理由：Novel2Script文件夹下
+
 ---
 
 ## 技术栈

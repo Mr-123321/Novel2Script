@@ -26,6 +26,10 @@
           </div>
         </div>
       </div>
+      <div v-else class="sidebar-empty">
+        <p>暂无剧本</p>
+        <p>上传小说开始创作</p>
+      </div>
 
       <!-- Delete Confirmation Modal -->
       <Teleport to="body">
@@ -43,10 +47,6 @@
           </div>
         </div>
       </Teleport>
-      <div v-else class="sidebar-empty">
-        <p>暂无剧本</p>
-        <p>上传小说开始创作</p>
-      </div>
     </aside>
 
     <!-- Main Content -->
