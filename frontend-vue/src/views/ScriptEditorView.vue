@@ -57,8 +57,17 @@ const CAP = 95
 
 // Progress simulation (4-minute exponential)
 let progressTimer: ReturnType<typeof setInterval> | null = null
+let hideProgressTimeout: ReturnType<typeof setTimeout> | null = null
 
 function startProgressSimulation() {
+  // Cancel any pending hide-progress timeout from a previous script load
+  if (hideProgressTimeout) {
+    clearTimeout(hideProgressTimeout)
+    hideProgressTimeout = null
+  }
+  // Reset error state — new generation should clear old errors
+  generationError.value = null
+
   startTime.value = Date.now()
   resolved.value = false
   progressVisible.value = true
@@ -134,8 +143,9 @@ watch(() => store.script?.status, (status) => {
   if (status === 'COMPLETED' || status === 'FAILED') {
     resolved.value = true
     displayProgress.value = 100
-    setTimeout(() => {
+    hideProgressTimeout = setTimeout(() => {
       progressVisible.value = false
+      hideProgressTimeout = null
     }, 600)
     stopProgressSimulation()
   }
@@ -143,6 +153,10 @@ watch(() => store.script?.status, (status) => {
 
 onUnmounted(() => {
   stopProgressSimulation()
+  if (hideProgressTimeout) {
+    clearTimeout(hideProgressTimeout)
+    hideProgressTimeout = null
+  }
 })
 
 const script = computed(() => store.script)

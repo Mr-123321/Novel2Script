@@ -237,6 +237,8 @@ function handleRegisterActions(id: number, actions: { save: () => void; cancel: 
 
 // ── Delete ──
 async function handleDelete(ci: ContentItem) {
+  if (!window.confirm('确定删除此段落吗？')) return
+
   if (!store.script || ci.item.id == null) {
     toast.warning('此段落数据异常，无法删除')
     return
