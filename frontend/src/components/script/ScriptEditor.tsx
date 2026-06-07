@@ -18,23 +18,19 @@ interface ScriptEditorProps {
 function PlotInsertionBlock({
   insertion,
   onDelete,
-  editable,
 }: {
   insertion: PlotInsertion;
   onDelete: (id: number) => void;
-  editable: boolean;
 }) {
   return (
-    <div className="relative rounded-lg border border-dashed border-amber-500/30 bg-amber-500/[0.03] px-4 py-3 my-3">
-      {editable && (
-        <button
-          onClick={() => onDelete(insertion.id)}
-          className="absolute top-2 right-2 p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-red-400 transition-colors"
-          title="删除此插入"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      )}
+    <div className="relative rounded-lg border border-dashed border-amber-500/30 bg-amber-500/[0.03] px-4 py-3 my-3 group/insertion">
+      <button
+        onClick={() => onDelete(insertion.id)}
+        className="absolute top-2 right-2 p-0.5 rounded opacity-0 group-hover/insertion:opacity-100 hover:bg-white/10 text-muted-foreground hover:text-red-400 transition-all"
+        title="删除此插入"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
       <div className="flex items-center gap-2 mb-1">
         <span className="text-[10px] uppercase tracking-wider text-amber-500/60 font-medium">
           📝 情节插入
@@ -105,15 +101,20 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
 
       {/* Center: Script content */}
       <main className="flex-1 overflow-y-auto">
-        {/* Top bar: mode toggle + scene list / character panel toggles */}
+        {/* Top bar: sidebar toggles + mode switch */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-2 glass border-b border-white/5">
-          <button
-            onClick={() => setLeftOpen(!leftOpen)}
-            className="p-1.5 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-            title="切换场景列表"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setLeftOpen(!leftOpen)}
+              className="p-1.5 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+              title="切换场景列表"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs text-muted-foreground/40 font-medium hidden sm:inline">
+              {script?.title ?? '剧本'}
+            </span>
+          </div>
 
           {/* Mode toggle */}
           <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/5">
@@ -127,7 +128,7 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
               )}
             >
               <BookOpen className="h-3.5 w-3.5" />
-              阅读模式
+              阅读
             </button>
             <button
               onClick={() => setEditMode(true)}
@@ -139,7 +140,7 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
               )}
             >
               <Edit3 className="h-3.5 w-3.5" />
-              编辑剧本
+              编辑
             </button>
           </div>
 
@@ -161,7 +162,6 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
                 key={`ins-${ins.id}`}
                 insertion={ins}
                 onDelete={handleDeleteInsertion}
-                editable={editMode}
               />
             ))}
 
@@ -186,7 +186,6 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
                     key={`ins-${ins.id}`}
                     insertion={ins}
                     onDelete={handleDeleteInsertion}
-                    editable={editMode}
                   />
                 ))}
             </div>

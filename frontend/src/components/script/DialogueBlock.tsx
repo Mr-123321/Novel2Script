@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScriptStore } from '@/stores/script-store';
 import { emotionLabel, cn } from '@/lib/utils';
-import { Pencil, Check, X, GripVertical } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { toast } from '@/stores/toast-store';
 import type { Dialogue } from '@/types/script';
 
@@ -13,6 +13,10 @@ interface DialogueBlockProps {
   editing?: boolean;
   /** Called when edit mode changes (save/cancel) */
   onEditStateChange?: (editing: boolean) => void;
+  /** Register save/cancel callbacks so parent toolbar can trigger them */
+  registerActions?: (actions: { save: () => void; cancel: () => void } | null) => void;
+  /** Hide internal save/cancel buttons (when parent toolbar provides them) */
+  hideActions?: boolean;
 }
 
 const EMOTIONS = [
@@ -29,6 +33,8 @@ export function DialogueBlock({
   dialogue,
   editing: externalEditing,
   onEditStateChange,
+  registerActions,
+  hideActions,
 }: DialogueBlockProps) {
   const script = useScriptStore((s) => s.script);
   const updateDialogueStore = useScriptStore((s) => s.updateDialogue);
@@ -58,6 +64,16 @@ export function DialogueBlock({
       inputRef.current.focus();
     }
   }, [isEditing]);
+
+  // Register save/cancel actions for parent toolbar
+  useEffect(() => {
+    if (isEditing && registerActions) {
+      registerActions({ save: handleSave, cancel: handleCancel });
+    } else if (!isEditing && registerActions) {
+      registerActions(null);
+    }
+    return () => { registerActions?.(null); };
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = () => {
     const trimmedSpeaker = speaker.trim();
@@ -172,26 +188,30 @@ export function DialogueBlock({
             />
           </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={handleCancel}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md hover:bg-white/10 text-muted-foreground transition-colors"
-            >
-              <X className="h-3 w-3" />
-              取消
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 transition-colors"
-            >
-              <Check className="h-3 w-3" />
-              保存
-            </button>
-          </div>
-          <p className="text-[10px] text-muted-foreground/40">
-            Ctrl+Enter 保存 · Esc 取消
-          </p>
+          {/* Action buttons — hidden when parent toolbar provides them */}
+          {!hideActions && (
+            <>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={handleCancel}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md hover:bg-white/10 text-muted-foreground transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                  取消
+                </button>
+                <button
+                  onClick={handleSave}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 transition-colors"
+                >
+                  <Check className="h-3 w-3" />
+                  保存
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground/40">
+                Ctrl+Enter 保存 · Esc 取消
+              </p>
+            </>
+          )}
         </div>
       ) : (
         /* ── View Mode ── */

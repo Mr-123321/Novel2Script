@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useScriptStore } from '@/stores/script-store';
 import { useSSE } from '@/hooks/use-sse';
@@ -8,13 +8,114 @@ import { getScript } from '@/lib/api';
 import { ScriptEditor } from '@/components/script/ScriptEditor';
 import type { WorkflowProgress as WorkflowProgressType } from '@/types/script';
 import Link from 'next/link';
-import { FileText, AlertCircle } from 'lucide-react';
-import { useState } from 'react';
+import { FileText, AlertCircle, Loader2 } from 'lucide-react';
+
+/** ────────────────────────────────────────────
+ *  Loading Progress Bar — ~4 minute gradual animation
+ * ──────────────────────────────────────────── */
+function LoadingProgress({
+  scriptStatus,
+  sseProgress,
+}: {
+  scriptStatus: string | undefined;
+  sseProgress: number;
+}) {
+  const [progress, setProgress] = useState(0);
+  const [visible, setVisible] = useState(true);
+  const startRef = useRef(Date.now());
+  const resolvedRef = useRef(false);
+
+  const TOTAL_SEC = 240; // 4 minutes
+  const CAP = 95;
+
+  useEffect(() => {
+    const tick = () => {
+      if (resolvedRef.current) return;
+
+      const elapsed = (Date.now() - startRef.current) / 1000;
+      // Exponential approach to cap
+      const simulated =
+        5 + (CAP - 5) * (1 - Math.exp(-elapsed / 55));
+
+      // If SSE reports higher, use it (but don't exceed cap)
+      const current = Math.max(
+        Math.min(simulated, CAP),
+        Math.min(sseProgress, CAP)
+      );
+
+      setProgress(current);
+    };
+
+    tick();
+    const interval = setInterval(tick, 200);
+    return () => clearInterval(interval);
+  }, [sseProgress]);
+
+  // When script resolves
+  useEffect(() => {
+    if (scriptStatus === 'COMPLETED' || scriptStatus === 'FAILED') {
+      resolvedRef.current = true;
+      // Animate to 100%
+      setProgress(100);
+      // Fade out after a short delay
+      const t = setTimeout(() => setVisible(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [scriptStatus]);
+
+  if (!visible) return null;
+
+  const statusText =
+    scriptStatus === 'GENERATING'
+      ? progress < 30
+        ? 'AI 正在分析小说结构…'
+        : progress < 55
+        ? '正在提取角色与情节…'
+        : progress < 75
+        ? '正在切分场景…'
+        : progress < 90
+        ? '正在生成对话与动作…'
+        : '正在编排最终剧本…'
+      : '正在加载剧本…';
+
+  return (
+    <div className="flex flex-col items-center gap-6 animate-fade-in">
+      {/* Icon */}
+      <div className="relative">
+        <div className="h-16 w-16 rounded-2xl bg-teal-500/10 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 text-teal-400 animate-spin" />
+        </div>
+        <div className="absolute inset-0 rounded-2xl ring-2 ring-teal-500/20 animate-glow-pulse" />
+      </div>
+
+      {/* Progress bar */}
+      <div className="w-80 max-w-[90vw] space-y-2">
+        <div className="h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400 transition-all duration-500 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{statusText}</span>
+          <span className="font-mono tabular-nums text-teal-400/80">
+            {Math.round(progress)}%
+          </span>
+        </div>
+      </div>
+
+      {/* Subtle hint */}
+      <p className="text-[11px] text-muted-foreground/40">
+        剧本生成预计需要 3-5 分钟，请耐心等待
+      </p>
+    </div>
+  );
+}
 
 export default function ScriptPage() {
   const params = useParams();
   const scriptId = Number(params.id);
-  const { script, setScript, updateProgress, isLoading, setIsLoading } =
+  const { script, setScript, progress, updateProgress, isLoading, setIsLoading } =
     useScriptStore();
   const [generationError, setGenerationError] = useState<string | null>(null);
 
@@ -27,20 +128,18 @@ export default function ScriptPage() {
   }, [scriptId, setScript, setIsLoading]);
 
   // SSE progress — backend sends named events: "progress", "complete", "error"
-  const handleProgress = (data: WorkflowProgressType) => {
+  const handleProgress = useCallback((data: WorkflowProgressType) => {
     updateProgress(data);
-  };
+  }, [updateProgress]);
 
-  const handleComplete = () => {
-    // Re-fetch final script when generation completes
+  const handleComplete = useCallback(() => {
     getScript(scriptId).then(setScript).catch(console.error);
-  };
+  }, [scriptId, setScript]);
 
-  const handleError = () => {
-    // Generation failed — re-fetch to get FAILED status, stop SSE
+  const handleError = useCallback(() => {
     getScript(scriptId).then(setScript).catch(console.error);
     setGenerationError('剧本生成失败，请返回重新生成');
-  };
+  }, [scriptId, setScript]);
 
   useSSE({
     scriptId,
@@ -51,6 +150,8 @@ export default function ScriptPage() {
   });
 
   const { error: storeError } = useScriptStore();
+
+  const sseProgress = progress?.overallProgress ?? 0;
 
   // Error state
   if (storeError && !script) {
@@ -70,22 +171,20 @@ export default function ScriptPage() {
     );
   }
 
-  // Loading state
+  // Loading / Generating state — show progress bar
   if (isLoading || !script) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div className="relative">
-            <div className="h-12 w-12 rounded-2xl bg-teal-500/10 flex items-center justify-center">
-              <div className="h-6 w-6 rounded-full border-2 border-teal-500/30 border-t-teal-400 animate-spin" />
-            </div>
-            <div className="absolute inset-0 rounded-2xl ring-2 ring-teal-500/20 animate-glow-pulse" />
-          </div>
-          <p className="text-sm text-muted-foreground">加载剧本中...</p>
-        </div>
+        <LoadingProgress
+          scriptStatus={script?.status}
+          sseProgress={sseProgress}
+        />
       </div>
     );
   }
+
+  // Show progress bar overlay when generating
+  const showProgressOverlay = script.status === 'GENERATING' && !generationError;
 
   return (
     <div className="flex flex-col h-screen">
@@ -162,6 +261,16 @@ export default function ScriptPage() {
               重新生成
             </Link>
           </div>
+        </div>
+      )}
+
+      {/* Progress overlay when generating */}
+      {showProgressOverlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <LoadingProgress
+            scriptStatus={script.status}
+            sseProgress={sseProgress}
+          />
         </div>
       )}
 

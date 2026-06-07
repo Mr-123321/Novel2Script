@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useScriptStore } from '@/stores/script-store';
 import { sceneHeader, sanitizeSceneHeading, formatTimeOfDay, cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -11,13 +11,10 @@ import {
   Clock,
   MessageSquare,
   Users,
-  GripVertical,
   Pencil,
   Trash2,
   Plus,
-  Check,
   X,
-  AlertTriangle,
 } from 'lucide-react';
 import { toast } from '@/stores/toast-store';
 import {
@@ -75,57 +72,6 @@ function renumberSequences(items: ContentItem[]) {
   items.forEach((ci, i) => {
     ci.item.sequence = (i + 1) * 10;
   });
-}
-
-/* ────────────────────────────────────────────
- *  Delete Confirmation Dialog
- * ──────────────────────────────────────────── */
-
-function DeleteConfirmDialog({
-  item,
-  onConfirm,
-  onCancel,
-}: {
-  item: ContentItem;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const preview =
-    item.type === 'dialogue'
-      ? `"${item.item.speaker}：${item.item.content}"`
-      : `"${item.item.description}"`;
-
-  return (
-    <div className="mt-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-4">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-medium text-red-300 mb-1">确认删除</h4>
-          <p className="text-xs text-muted-foreground mb-2">
-            确定要删除这个段落吗？此操作不可撤销。
-          </p>
-          <p className="text-xs text-muted-foreground/60 italic mb-3 line-clamp-2 border-l-2 border-red-500/20 pl-2">
-            段落预览：{preview}
-          </p>
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={onCancel}
-              className="px-3 py-1 text-xs rounded-md hover:bg-white/10 text-muted-foreground transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={onConfirm}
-              className="flex items-center gap-1 px-3 py-1 text-xs rounded-md bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors"
-            >
-              <Trash2 className="h-3 w-3" />
-              确认删除
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 /* ────────────────────────────────────────────
@@ -343,14 +289,15 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Paragraph operation state
-  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [insertAfterIdx, setInsertAfterIdx] = useState<number | null>(null);
+
+  // Ref to call save/cancel on the currently editing block
+  const blockActionsRef = useRef<{ save: () => void; cancel: () => void } | null>(null);
 
   // Clear all editing states when switching to reading mode
   useEffect(() => {
     if (!editable) {
-      setDeletingId(null);
       setEditingId(null);
       setInsertAfterIdx(null);
       setDragItemIdx(null);
@@ -404,9 +351,11 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
   /* ── Delete ── */
   const handleDelete = useCallback(
     async (item: ContentItem) => {
-      if (!script) return;
+      if (!script || item.item.id == null) {
+        toast.warning('此段落数据异常，无法删除');
+        return;
+      }
 
-      // Call backend API first
       try {
         if (item.type === 'action') {
           await deleteAction(script.id!, scene.id, item.item.id);
@@ -414,11 +363,10 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
           await deleteDialogueParagraph(script.id!, scene.id, item.item.id);
         }
       } catch {
-        toast.error('删除失败，请刷新后重试');
+        toast.error('删除失败，请重试');
         return;
       }
 
-      // On success, update local state
       const updatedScenes = script.scenes.map((s) => {
         if (s.id !== scene.id) return s;
         if (item.type === 'action') {
@@ -437,13 +385,8 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
       });
 
       setScript({ ...script, scenes: updatedScenes });
-      setDeletingId(null);
-
-      if (item.type === 'dialogue') {
-        toast.success(`🗑️ 段落已删除 · 已删除 ${(item.item as Dialogue).speaker} 的对白`);
-      } else {
-        toast.success('🗑️ 段落已删除');
-      }
+      setEditingId(null);
+      toast.success('段落已删除');
     },
     [script, scene.id, setScript]
   );
@@ -662,7 +605,7 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
 
       {/* ── Content Items ── */}
       <div className="space-y-0 ml-8">
-        {/* Insert before first paragraph (edit mode only) */}
+        {/* Insert before first paragraph */}
         {editable && contentItems.length > 0 && (
           <InsertBetweenButton
             label="在开头插入段落"
@@ -710,7 +653,7 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
         )}
 
         {contentItems.map((ci, idx) => (
-          <div key={`${ci.type}-${ci.item.id}`} className="relative">
+          <div key={`${ci.type}-${ci.item.id ?? 'idx-' + idx}`} className="relative">
             {/* Drop indicator (edit mode only) */}
             {editable && dragOverIdx === idx && dragItemIdx !== idx && (
               <div className="absolute -top-1 left-0 right-0 z-10 flex items-center gap-2 pointer-events-none">
@@ -724,16 +667,7 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
 
             {/* Paragraph row */}
             <div
-              draggable={editable}
-              onDragStart={
-                editable
-                  ? (e) => {
-                      e.dataTransfer.setData('text/plain', String(idx));
-                      e.dataTransfer.effectAllowed = 'move';
-                      handleDragStart(idx);
-                    }
-                  : undefined
-              }
+              draggable={false}
               onDragOver={editable ? (e) => handleDragOver(e, idx) : undefined}
               onDragLeave={editable ? handleDragLeave : undefined}
               onDrop={
@@ -744,7 +678,6 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                     }
                   : undefined
               }
-              onDragEnd={editable ? handleDragEnd : undefined}
               onClick={(e) => e.stopPropagation()}
               className={cn(
                 'group/row relative rounded-lg transition-all duration-200',
@@ -752,52 +685,6 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                 editable && dragOverIdx === idx && dragItemIdx !== idx && 'mt-6'
               )}
             >
-              {/* Hover toolbar (edit mode only) */}
-              {editable && (
-                <div
-                  className={cn(
-                    'absolute -left-10 top-1 flex items-center gap-0.5 transition-opacity duration-150 z-20',
-                    deletingId === ci.item.id || editingId === ci.item.id
-                      ? 'opacity-100'
-                      : 'opacity-100'
-                  )}
-                >
-                  {/* Drag handle */}
-                  <button
-                    className="p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors cursor-grab active:cursor-grabbing"
-                    title="按住并上下拖拽，可移动段落顺序"
-                  >
-                    <GripVertical className="h-3.5 w-3.5" />
-                  </button>
-
-                  {/* Edit button */}
-                  <button
-                    onClick={() =>
-                      setEditingId(
-                        editingId === ci.item.id ? null : ci.item.id
-                      )
-                    }
-                    className="p-0.5 rounded hover:bg-teal-500/20 text-muted-foreground hover:text-teal-400 transition-colors"
-                    title="双击段落或点击此按钮进入编辑模式"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-
-                  {/* Delete button */}
-                  <button
-                    onClick={() =>
-                      setDeletingId(
-                        deletingId === ci.item.id ? null : ci.item.id
-                      )
-                    }
-                    className="p-0.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                    title="删除当前段落（不可撤销）"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-
               {/* Paragraph content */}
               <div
                 onDoubleClick={editable ? () => setEditingId(ci.item.id) : undefined}
@@ -810,6 +697,10 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                     onEditStateChange={(isEditing) => {
                       if (!isEditing) setEditingId(null);
                     }}
+                    registerActions={(actions) => {
+                      blockActionsRef.current = actions;
+                    }}
+                    hideActions={editable && editingId === ci.item.id}
                   />
                 ) : (
                   <DialogueBlock
@@ -818,21 +709,65 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                     onEditStateChange={(isEditing) => {
                       if (!isEditing) setEditingId(null);
                     }}
+                    registerActions={(actions) => {
+                      blockActionsRef.current = actions;
+                    }}
+                    hideActions={editable && editingId === ci.item.id}
                   />
                 )}
               </div>
 
-              {/* Delete confirmation */}
-              {editable && deletingId === ci.item.id && (
-                <DeleteConfirmDialog
-                  item={ci}
-                  onConfirm={() => handleDelete(ci)}
-                  onCancel={() => setDeletingId(null)}
-                />
+              {/* Hover pencil trigger */}
+              {editable && editingId !== ci.item.id && (
+                <div className="absolute right-0 top-0 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 z-10">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingId(ci.item.id);
+                    }}
+                    className="p-1 rounded-md hover:bg-teal-500/20 text-muted-foreground hover:text-teal-400 transition-colors"
+                    title="修改此段落"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Toolbar: save / cancel / delete */}
+              {editable && editingId === ci.item.id && (
+                <div className="mt-2 flex items-center gap-0.5 border-t border-white/[0.06] pt-2 animate-in fade-in duration-150">
+                  <button
+                    onClick={() => blockActionsRef.current?.save()}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-teal-400 hover:bg-teal-500/10 transition-colors"
+                    title="保存修改"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    保存
+                  </button>
+                  <button
+                    onClick={() => {
+                      blockActionsRef.current?.cancel();
+                      setEditingId(null);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+                    title="取消修改"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    取消
+                  </button>
+                  <button
+                    onClick={() => handleDelete(ci)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="删除段落"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    删除
+                  </button>
+                </div>
               )}
             </div>
 
-            {/* Insert between button (edit mode only) */}
+            {/* Insert between button */}
             {editable && (
               <InsertBetweenButton
                 label={`在"${
