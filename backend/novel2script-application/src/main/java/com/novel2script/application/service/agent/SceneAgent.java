@@ -7,7 +7,7 @@ import com.novel2script.domain.model.Chapter;
 import com.novel2script.domain.model.Character;
 import com.novel2script.domain.model.PlotEvent;
 import com.novel2script.domain.model.Scene;
-import com.novel2script.infrastructure.annotation.AiMonitored;
+
 import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -59,7 +59,6 @@ public class SceneAgent {
      * @param characters  known characters (for character change detection)
      * @return list of scenes in chronological order
      */
-    @AiMonitored(value = "scene-segmentation", version = "1.0")
     public List<Scene> segment(List<Chapter> chapters,
                                List<PlotEvent> plotEvents,
                                List<Character> characters) {

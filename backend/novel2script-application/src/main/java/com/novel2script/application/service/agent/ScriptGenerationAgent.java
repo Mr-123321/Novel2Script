@@ -9,7 +9,7 @@ import com.novel2script.domain.model.Dialogue;
 import com.novel2script.domain.model.Scene;
 import com.novel2script.domain.model.Script;
 import com.novel2script.domain.model.Character;
-import com.novel2script.infrastructure.annotation.AiMonitored;
+
 import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -85,7 +85,6 @@ public class ScriptGenerationAgent {
      * @param scriptId script ID for ID generation
      * @return a fully populated Script, or null if AI fails
      */
-    @AiMonitored(value = "script-generation", version = "1.0")
     public Script generate(List<Chapter> chapters, String novelTitle, Long scriptId) {
         return generateOutline(chapters, novelTitle, scriptId, false);
     }
@@ -103,7 +102,6 @@ public class ScriptGenerationAgent {
      * @param savePartial whether to attempt partial save on failure (via callback)
      * @return a Script with characters + scene outlines, or null if AI fails
      */
-    @AiMonitored(value = "script-generation", version = "2.0")
     public Script generateOutline(List<Chapter> chapters, String novelTitle, Long scriptId, boolean savePartial) {
         if (chapters == null || chapters.isEmpty()) {
             log.warn("ScriptGenerationAgent: no chapters provided");

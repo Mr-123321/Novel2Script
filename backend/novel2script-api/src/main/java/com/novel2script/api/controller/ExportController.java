@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -58,10 +59,13 @@ public class ExportController {
         byte[] yamlBytes = yamlContent.getBytes(StandardCharsets.UTF_8);
         ByteArrayResource resource = new ByteArrayResource(yamlBytes);
 
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename("script-" + scriptId + ".yaml", StandardCharsets.UTF_8)
+                .build();
+
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/x-yaml"))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"script-" + scriptId + ".yaml\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(yamlBytes.length))
                 .body(resource);
     }
@@ -81,12 +85,15 @@ public class ExportController {
         String title = scriptService.findById(scriptId)
                 .map(s -> s.getTitle())
                 .orElse("script");
-        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String safeTitle = sanitizeFilename(title);
+
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(safeTitle + ".txt", StandardCharsets.UTF_8)
+                .build();
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + safeTitle + ".txt\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(txtBytes.length))
                 .body(resource);
     }
@@ -106,13 +113,22 @@ public class ExportController {
         String title = scriptService.findById(scriptId)
                 .map(s -> s.getTitle())
                 .orElse("script");
-        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String safeTitle = sanitizeFilename(title);
+
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(safeTitle + ".md", StandardCharsets.UTF_8)
+                .build();
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/markdown; charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + safeTitle + ".md\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(mdBytes.length))
                 .body(resource);
+    }
+
+    /** Remove characters unsafe for filenames across OSes. */
+    private static String sanitizeFilename(String name) {
+        if (name == null || name.isBlank()) return "script";
+        return name.replaceAll("[\\\\/:*?\"<>|]", "_").strip();
     }
 }

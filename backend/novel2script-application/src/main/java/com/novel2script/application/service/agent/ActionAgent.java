@@ -11,7 +11,7 @@ import com.novel2script.domain.model.Action;
 import com.novel2script.domain.model.Character;
 import com.novel2script.domain.model.Dialogue;
 import com.novel2script.domain.model.Scene;
-import com.novel2script.infrastructure.annotation.AiMonitored;
+
 import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -85,7 +85,6 @@ public class ActionAgent {
      * @param presentCharacters  characters appearing in this scene
      * @return list of {@link Action} in chronological order (by sequence)
      */
-    @AiMonitored(value = PROMPT_NAME, version = "1.0")
     public List<Action> generate(Scene scene,
                                  List<Dialogue> dialogues,
                                  List<Character> presentCharacters) {

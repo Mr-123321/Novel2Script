@@ -41,7 +41,7 @@ class CharacterAgentTest {
         objectMapper = new ObjectMapper();
         // We don't wire the full Spring context for unit tests.
         // Construct with null for AI-call dependencies; only test pure-logic methods.
-        agent = new CharacterAgent(null, null, null, null, objectMapper);
+        agent = new CharacterAgent(null, null, null, objectMapper);
         promptRegistry = null; // not used in pure-logic tests
     }
 
