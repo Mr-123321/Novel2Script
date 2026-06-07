@@ -7,11 +7,8 @@ import com.novel2script.application.service.agent.model.CharacterExtractionResul
 import com.novel2script.common.enums.TaskType;
 import com.novel2script.domain.model.Chapter;
 import com.novel2script.domain.model.Character;
-import com.novel2script.domain.prompt.PromptAuditRecord;
 import com.novel2script.domain.prompt.ValidationRule;
-import com.novel2script.infrastructure.annotation.AiMonitored;
 import com.novel2script.infrastructure.config.AiModelRouter;
-import com.novel2script.infrastructure.prompt.PromptAuditService;
 import com.novel2script.infrastructure.prompt.PromptCache;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -23,7 +20,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,7 +43,7 @@ import java.util.stream.Collectors;
  *   <li><b>Incremental extraction</b>: when existing characters are provided,
  *       only new characters are returned.</li>
  *   <li><b>Audit trail</b>: every AI call is recorded via
- *       {@link PromptAuditService}.</li>
+ *       audit logging.</li>
  * </ul>
  */
 @Slf4j
@@ -59,18 +55,15 @@ public class CharacterAgent {
     private final PromptRegistry promptRegistry;
     private final AiModelRouter modelRouter;
     private final PromptCache promptCache;
-    private final PromptAuditService auditService;
     private final ObjectMapper objectMapper;
 
     public CharacterAgent(PromptRegistry promptRegistry,
                           AiModelRouter modelRouter,
                           PromptCache promptCache,
-                          PromptAuditService auditService,
                           ObjectMapper objectMapper) {
         this.promptRegistry = promptRegistry;
         this.modelRouter = modelRouter;
         this.promptCache = promptCache;
-        this.auditService = auditService;
         this.objectMapper = objectMapper;
     }
 
@@ -84,7 +77,6 @@ public class CharacterAgent {
      *                        provide additional context (not for filtering)
      * @return list of extracted character results
      */
-    @AiMonitored(value = PROMPT_NAME, version = "2.0")
     public List<CharacterExtractionResult> extract(
             List<Chapter> chapters,
             List<String> focusCharacters) {
@@ -580,50 +572,24 @@ public class CharacterAgent {
         return errors;
     }
 
-    // ── Audit helpers ────────────────────────────────────
+    // ── Audit helpers (log-only since DB audit removed) ───
 
     private void auditSuccess(PromptTemplate template, String modelName,
                                int inputTokens, int outputTokens,
                                long latencyMs, int retryCount,
                                String fullResponse) {
-        try {
-            auditService.record(PromptAuditRecord.builder()
-                    .promptName(template.getName())
-                    .promptVersion(template.getVersion())
-                    .modelName(modelName)
-                    .inputTokens(inputTokens)
-                    .outputTokens(outputTokens)
-                    .latencyMs((int) latencyMs)
-                    .retryCount(retryCount)
-                    .success(true)
-                    .fullResponse(truncate(fullResponse, 10000))
-                    .createdAt(LocalDateTime.now())
-                    .build());
-        } catch (Exception e) {
-            log.debug("CharacterAgent: audit write failed (non-fatal): {}", e.getMessage());
-        }
+        log.debug("{} v{} audit: SUCCESS model={} tokens={}/{} latency={}ms retries={}",
+                template.getName(), template.getVersion(), modelName,
+                inputTokens, outputTokens, latencyMs, retryCount);
     }
 
     private void auditFailure(PromptTemplate template, String modelName,
                                int inputTokens, int outputTokens,
                                long latencyMs, int retryCount,
                                String errorMessage) {
-        try {
-            auditService.record(PromptAuditRecord.builder()
-                    .promptName(template.getName())
-                    .promptVersion(template.getVersion())
-                    .modelName(modelName)
-                    .inputTokens(inputTokens)
-                    .outputTokens(outputTokens)
-                    .latencyMs((int) latencyMs)
-                    .retryCount(retryCount)
-                    .success(false)
-                    .errorMessage(truncate(errorMessage, 500))
-                    .createdAt(LocalDateTime.now())
-                    .build());
-        } catch (Exception e) {
-            log.debug("CharacterAgent: audit write failed (non-fatal): {}", e.getMessage());
-        }
+        log.debug("{} v{} audit: FAILED model={} tokens={}/{} latency={}ms retries={} error={}",
+                template.getName(), template.getVersion(), modelName,
+                inputTokens, outputTokens, latencyMs, retryCount, errorMessage);
     }
 
     // ── Utility ──────────────────────────────────────────

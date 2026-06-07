@@ -6,7 +6,7 @@ import com.novel2script.common.enums.TaskType;
 import com.novel2script.domain.model.Chapter;
 import com.novel2script.domain.model.Character;
 import com.novel2script.domain.model.PlotEvent;
-import com.novel2script.infrastructure.annotation.AiMonitored;
+
 import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -57,7 +57,6 @@ public class PlotExtractionAgent {
      * @param knownCharacters  known character list for name→ID mapping
      * @return list of extracted, deduplicated PlotEvents in chronological order
      */
-    @AiMonitored(value = "plot-extraction", version = "1.0")
     public List<PlotEvent> extract(List<Chapter> chapters, List<Character> knownCharacters) {
         if (chapters == null || chapters.isEmpty()) {
             log.warn("PlotExtractionAgent: no chapters to extract from");
@@ -89,7 +88,6 @@ public class PlotExtractionAgent {
      * @param existingEvents   previously extracted events
      * @return merged and updated event list
      */
-    @AiMonitored(value = "plot-extraction-incremental", version = "1.0")
     public List<PlotEvent> extractIncremental(
             List<Chapter> newChapters,
             List<Character> characters,

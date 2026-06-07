@@ -8,7 +8,7 @@ import com.novel2script.domain.model.Character;
 import com.novel2script.domain.model.Dialogue;
 import com.novel2script.domain.model.PlotEvent;
 import com.novel2script.domain.model.Scene;
-import com.novel2script.infrastructure.annotation.AiMonitored;
+
 import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
@@ -88,7 +88,6 @@ public class DialogueAgent {
      * @param characterEmotions   character_id → current emotional state override
      * @return list of generated dialogues in sequence order
      */
-    @AiMonitored(value = "dialogue-generation", version = "1.0")
     public List<Dialogue> generate(Scene scene,
                                    List<Character> presentCharacters,
                                    List<PlotEvent> sceneEvents,
@@ -154,7 +153,6 @@ public class DialogueAgent {
      * @param characters         all available characters
      * @return a single suggested Dialogue line, or null
      */
-    @AiMonitored(value = "dialogue-suggest", version = "1.0")
     public Dialogue suggestNext(Scene scene,
                                 List<Dialogue> existingDialogues,
                                 List<Character> characters) {
