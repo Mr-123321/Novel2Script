@@ -29,11 +29,17 @@
 
       <!-- Ready state -->
       <div v-else class="ready-state">
-        <!-- Inkstone circle -->
-        <div class="inkstone-circle" :class="{ 'inkstone-circle--drag': isDragOver }">
-          <span class="inkstone-icon">{{ isDragOver ? '⬆️' : '📤' }}</span>
+        <!-- Upload icon -->
+        <div class="upload-icon-wrap" :class="{ 'upload-icon-wrap--drag': isDragOver }">
+          <svg class="upload-svg" viewBox="0 0 48 48" fill="none">
+            <path d="M24 8 v20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M17 17 l7 -7 l7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="10" y="27" width="28" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="16" cy="28" r="1.5" fill="currentColor" opacity="0.5"/>
+            <circle cx="22" cy="28" r="1.5" fill="currentColor" opacity="0.5"/>
+          </svg>
         </div>
-        <p class="upload-title">{{ isDragOver ? '松开以放置文件' : '拖拽小说文件到此处，或点击上传' }}</p>
+        <p class="upload-title">{{ isDragOver ? '✨ 松开以放置文件' : '拖拽小说文件到此处，或点击上传' }}</p>
         <p class="upload-subtitle">支持 .txt / .md 格式 · 最大 50 MB</p>
         <div class="format-badges">
           <span class="format-badge">.txt</span>
@@ -128,21 +134,59 @@ async function processFile(file: File) {
   padding: 48px 24px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   border: 2px dashed rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.01);
+  overflow: hidden;
+}
+
+.inkstone-zone::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: var(--radius-xl);
+  padding: 2px;
+  background: linear-gradient(135deg,
+    transparent 20%,
+    rgba(61, 184, 176, 0.08) 50%,
+    transparent 80%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
 }
 
 .inkstone-zone:hover {
   border-color: rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.02);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+
+.inkstone-zone:hover::before {
+  opacity: 1;
 }
 
 .inkstone-zone--drag {
   border-color: var(--teal-primary) !important;
   background: var(--teal-surface) !important;
   transform: scale(1.02);
-  box-shadow: 0 0 40px rgba(45, 212, 191, 0.1);
+  box-shadow:
+    0 0 40px rgba(45, 212, 191, 0.12),
+    inset 0 0 40px rgba(45, 212, 191, 0.03);
+}
+
+.inkstone-zone--drag::before {
+  opacity: 1;
+  background: linear-gradient(135deg,
+    transparent 10%,
+    var(--teal-primary) 50%,
+    transparent 90%
+  );
 }
 
 .file-input-hidden {
@@ -196,27 +240,35 @@ async function processFile(file: File) {
   gap: 10px;
 }
 
-.inkstone-circle {
+.upload-icon-wrap {
   width: 64px;
   height: 64px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.03);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 4px;
-  transition: all 0.3s;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.inkstone-circle--drag {
+.upload-icon-wrap--drag {
   background: var(--teal-surface);
   border-color: rgba(61, 184, 176, 0.3);
-  transform: scale(1.1);
+  transform: scale(1.12);
+  box-shadow: 0 0 24px rgba(61, 184, 176, 0.15);
 }
 
-.inkstone-icon {
-  font-size: 28px;
+.upload-svg {
+  width: 32px;
+  height: 32px;
+  color: var(--text-secondary);
+  transition: all 0.3s;
+}
+
+.upload-icon-wrap--drag .upload-svg {
+  color: var(--teal-primary);
 }
 
 .upload-title {

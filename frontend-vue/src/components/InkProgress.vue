@@ -1,72 +1,45 @@
 <template>
   <div class="ink-progress">
-    <!-- 墨韵牡丹绽放 - Ink peony bloom -->
+    <!-- 墨韵牡丹 — 花瓣持续旋转绽放 -->
     <div class="peony">
       <div class="peony-center"></div>
       <span
         v-for="i in 8"
         :key="i"
-        class="peony-petal"
-        :class="{ 'peony-petal--bloom': percent > (i - 1) * 12.5 }"
+        class="peony-petal peony-petal--bloom"
         :style="{
           '--petal-rotate': (i * 45) + 'deg',
-          animationDelay: (i * 0.08) + 's'
+          animationDelay: (i * 0.12) + 's'
         }"
       ></span>
     </div>
 
-    <!-- 笔锋游走 - Brush stroke stages -->
-    <div class="brush-strokes">
-      <div
-        v-for="(stroke, i) in displayStages"
-        :key="i"
-        class="stroke-track"
-      >
-        <div
-          class="stroke-fill"
-          :class="{ 'stroke-fill--done': stroke.done }"
-          :style="{ width: stroke.percent + '%' }"
-        >
-          <span class="stroke-trail" v-if="stroke.percent > 0 && stroke.percent < 100"></span>
-        </div>
-        <span class="stroke-label">{{ stroke.label }}</span>
-        <span class="stroke-check" v-if="stroke.done">✓</span>
-      </div>
-    </div>
+    <!-- 提示文案 -->
+    <p class="progress-message">{{ displayMessage }}</p>
 
-    <p class="progress-message">{{ message }}</p>
-    <p class="progress-percent">{{ Math.round(percent) }}%</p>
+    <!-- 墨点呼吸 -->
+    <div class="ink-dots">
+      <span class="ink-dot" v-for="i in 3" :key="i" :style="{ animationDelay: i * 0.25 + 's' }"></span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 
-interface Stage {
-  key: string
-  label: string
-  done: boolean
-  percent: number
-}
-
 const props = defineProps<{
   percent: number
   message?: string
-  stages?: Stage[]
 }>()
 
-const displayStages = computed<Stage[]>(() => {
-  if (props.stages && props.stages.length > 0) return props.stages
-  // Default stages derived from percent
-  return [
-    { key: 'parse', label: '章节解析', done: props.percent >= 14, percent: Math.min(100, Math.max(0, (props.percent / 14) * 100)) },
-    { key: 'character', label: '人物抽取', done: props.percent >= 28, percent: props.percent < 14 ? 0 : Math.min(100, ((props.percent - 14) / 14) * 100) },
-    { key: 'plot', label: '剧情分析', done: props.percent >= 42, percent: props.percent < 28 ? 0 : Math.min(100, ((props.percent - 28) / 14) * 100) },
-    { key: 'scene', label: '场景切分', done: props.percent >= 57, percent: props.percent < 42 ? 0 : Math.min(100, ((props.percent - 42) / 15) * 100) },
-    { key: 'dialogue', label: '对白生成', done: props.percent >= 71, percent: props.percent < 57 ? 0 : Math.min(100, ((props.percent - 57) / 14) * 100) },
-    { key: 'action', label: '动作生成', done: props.percent >= 85, percent: props.percent < 71 ? 0 : Math.min(100, ((props.percent - 71) / 14) * 100) },
-    { key: 'assembly', label: '剧本组装', done: props.percent >= 100, percent: props.percent < 85 ? 0 : Math.min(100, ((props.percent - 85) / 15) * 100) }
-  ]
+const displayMessage = computed(() => {
+  if (props.message) return props.message
+  if (props.percent >= 100) return '生成完成 ✨'
+  const p = props.percent
+  if (p < 30) return '墨韵初染，解析文中意象…'
+  if (p < 60) return '笔锋游走，勾勒人物脉络…'
+  if (p < 85) return '落墨成章，编织场景对白…'
+  return '收笔点睛，剧本即将呈现…'
 })
 </script>
 
@@ -75,145 +48,125 @@ const displayStages = computed<Stage[]>(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-  padding: 40px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-float);
-  max-width: 440px;
+  gap: 24px;
+  padding: 44px 40px;
+  background: linear-gradient(135deg,
+    rgba(18, 20, 24, 0.92),
+    rgba(24, 28, 32, 0.88)
+  );
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  box-shadow:
+    0 0 60px rgba(61, 184, 176, 0.06),
+    0 8px 32px rgba(0, 0, 0, 0.3);
+  max-width: 400px;
   width: 100%;
 }
 
-/* Peony */
+/* ── 牡丹花 ── */
 .peony {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .peony-center {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 14px;
-  height: 14px;
-  margin: -7px 0 0 -7px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--teal-primary);
-  box-shadow: 0 0 12px var(--teal-glow);
+  box-shadow: 0 0 20px var(--teal-glow), 0 0 40px rgba(61, 184, 176, 0.25);
   z-index: 2;
+  animation: centerPulse 2s ease-in-out infinite;
 }
 
+@keyframes centerPulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+/* 花瓣 — 持续旋转 + 呼吸 */
 .peony-petal {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 10px;
-  height: 28px;
-  margin-left: -5px;
-  margin-top: -28px;
+  width: 12px;
+  height: 32px;
+  margin-left: -6px;
+  margin-top: -34px;
   border-radius: 50%;
-  background: rgba(61, 184, 176, 0.12);
   transform-origin: center bottom;
-  transform: rotate(var(--petal-rotate)) scale(0);
-  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: petalSway 3s ease-in-out infinite;
 }
 
 .peony-petal--bloom {
-  animation: petalBloom 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  background: linear-gradient(to top, var(--teal-primary), var(--cinnabar));
-}
-
-@keyframes petalBloom {
-  0% { transform: rotate(var(--petal-rotate)) scale(0); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: rotate(var(--petal-rotate)) scale(1); opacity: 1; }
-}
-
-/* Brush strokes */
-.brush-strokes {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.stroke-track {
-  position: relative;
-  height: 24px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.03);
-}
-
-.stroke-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: linear-gradient(90deg,
-    rgba(61, 184, 176, 0.2),
-    rgba(61, 184, 176, 0.5),
-    var(--teal-primary)
+  background: linear-gradient(to top,
+    rgba(61, 184, 176, 0.3),
+    rgba(61, 184, 176, 0.7),
+    rgba(194, 59, 34, 0.3)
   );
-  border-radius: 4px;
-  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 0;
+  transform: rotate(var(--petal-rotate)) scale(1);
 }
 
-.stroke-fill--done {
-  background: linear-gradient(90deg, var(--teal-muted), var(--teal-primary));
+@keyframes petalSway {
+  0%, 100% {
+    transform: rotate(var(--petal-rotate)) scale(0.85);
+    opacity: 0.5;
+  }
+  25% {
+    transform: rotate(var(--petal-rotate)) scale(1.05);
+    opacity: 0.9;
+  }
+  50% {
+    transform: rotate(var(--petal-rotate)) scale(1);
+    opacity: 0.7;
+  }
+  75% {
+    transform: rotate(var(--petal-rotate)) scale(0.9);
+    opacity: 0.6;
+  }
 }
 
-.stroke-trail {
-  position: absolute;
-  right: -4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--teal-hover);
-  box-shadow: 0 0 10px var(--teal-glow);
-  animation: brushTrail 0.8s ease-in-out infinite;
-}
 
-.stroke-label {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 11px;
-  color: var(--text-secondary);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.stroke-check {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 12px;
-  color: var(--teal-primary);
-  z-index: 1;
-}
-
-/* Message */
+/* ── 文案 ── */
 .progress-message {
   font-family: var(--font-heading);
   font-size: 14px;
   color: var(--text-secondary);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
+  text-align: center;
+  animation: textShimmer 3s ease-in-out infinite;
 }
 
-.progress-percent {
-  font-family: var(--font-display);
-  font-size: 32px;
-  color: var(--teal-primary);
-  text-shadow: 0 0 16px var(--teal-glow);
+@keyframes textShimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ── 墨点 ── */
+.ink-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.ink-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(61, 184, 176, 0.4);
+  animation: inkBreathe 1.6s ease-in-out infinite;
+}
+
+.ink-dot:nth-child(1) { animation-delay: 0s; }
+.ink-dot:nth-child(2) { animation-delay: 0.25s; }
+.ink-dot:nth-child(3) { animation-delay: 0.5s; }
+
+@keyframes inkBreathe {
+  0%, 100% { opacity: 0.2; transform: scale(0.7); }
+  50% { opacity: 0.8; transform: scale(1.3); }
 }
 </style>
