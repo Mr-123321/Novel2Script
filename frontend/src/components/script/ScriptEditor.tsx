@@ -49,17 +49,29 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
   const [rightOpen, setRightOpen] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const sceneRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const mainRef = useRef<HTMLElement>(null);
+  const hasScrolledRef = useRef(false);
 
   const selectedScene = script?.scenes.find((s) => s.id === selectedSceneId);
 
-  // Scroll to selected scene when it changes
+  // Scroll to selected scene on mount / when selection changes
   useEffect(() => {
-    if (selectedSceneId) {
-      const el = sceneRefs.current.get(selectedSceneId);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Small delay to ensure DOM is rendered
+    const timer = setTimeout(() => {
+      if (selectedSceneId) {
+        const el = sceneRefs.current.get(selectedSceneId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          hasScrolledRef.current = true;
+          return;
+        }
       }
-    }
+      // No scene selected or element not found — scroll to top
+      if (!hasScrolledRef.current && mainRef.current) {
+        mainRef.current.scrollTop = 0;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [selectedSceneId]);
 
   const insertions = script?.plotInsertions ?? [];
@@ -100,7 +112,7 @@ export function ScriptEditor({ scriptId: _scriptId }: ScriptEditorProps) {
       </aside>
 
       {/* Center: Script content */}
-      <main className="flex-1 overflow-y-auto">
+      <main ref={mainRef} className="flex-1 overflow-y-auto">
         {/* Top bar: sidebar toggles + mode switch */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-2 glass border-b border-white/5">
           <div className="flex items-center gap-2">

@@ -65,16 +65,6 @@ export function DialogueBlock({
     }
   }, [isEditing]);
 
-  // Register save/cancel actions for parent toolbar
-  useEffect(() => {
-    if (isEditing && registerActions) {
-      registerActions({ save: handleSave, cancel: handleCancel });
-    } else if (!isEditing && registerActions) {
-      registerActions(null);
-    }
-    return () => { registerActions?.(null); };
-  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleSave = () => {
     const trimmedSpeaker = speaker.trim();
     const trimmedContent = content.trim();
@@ -112,6 +102,25 @@ export function DialogueBlock({
     setInternalEditing(false);
     onEditStateChange?.(false);
   };
+
+  // Keep latest handleSave/handleCancel in refs to avoid stale closure in registerActions
+  const handleSaveRef = useRef(handleSave);
+  const handleCancelRef = useRef(handleCancel);
+  handleSaveRef.current = handleSave;
+  handleCancelRef.current = handleCancel;
+
+  // Register save/cancel actions for parent toolbar (via refs to always call latest)
+  useEffect(() => {
+    if (isEditing && registerActions) {
+      registerActions({
+        save: () => handleSaveRef.current(),
+        cancel: () => handleCancelRef.current(),
+      });
+    } else if (!isEditing && registerActions) {
+      registerActions(null);
+    }
+    return () => { registerActions?.(null); };
+  }, [isEditing]);
 
   return (
     <div

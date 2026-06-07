@@ -292,8 +292,8 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
   const [editingId, setEditingId] = useState<number | null>(null);
   const [insertAfterIdx, setInsertAfterIdx] = useState<number | null>(null);
 
-  // Ref to call save/cancel on the currently editing block
-  const blockActionsRef = useRef<{ save: () => void; cancel: () => void } | null>(null);
+  // Map of paragraph id → save/cancel actions (one per paragraph, avoids overwrite)
+  const blockActionsRef = useRef<Map<number, { save: () => void; cancel: () => void }>>(new Map());
 
   // Clear all editing states when switching to reading mode
   useEffect(() => {
@@ -698,7 +698,11 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                       if (!isEditing) setEditingId(null);
                     }}
                     registerActions={(actions) => {
-                      blockActionsRef.current = actions;
+                      if (actions) {
+                        blockActionsRef.current.set(ci.item.id, actions);
+                      } else {
+                        blockActionsRef.current.delete(ci.item.id);
+                      }
                     }}
                     hideActions={editable && editingId === ci.item.id}
                   />
@@ -710,16 +714,20 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                       if (!isEditing) setEditingId(null);
                     }}
                     registerActions={(actions) => {
-                      blockActionsRef.current = actions;
+                      if (actions) {
+                        blockActionsRef.current.set(ci.item.id, actions);
+                      } else {
+                        blockActionsRef.current.delete(ci.item.id);
+                      }
                     }}
                     hideActions={editable && editingId === ci.item.id}
                   />
                 )}
               </div>
 
-              {/* Hover pencil trigger */}
-              {editable && editingId !== ci.item.id && (
-                <div className="absolute right-0 top-0 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 z-10">
+              {/* Hover pencil trigger — left side, only when not editing this paragraph */}
+              {editable && editingId !== ci.item.id && ci.item.id != null && (
+                <div className="absolute -left-8 top-0 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 z-10">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -733,11 +741,11 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                 </div>
               )}
 
-              {/* Toolbar: save / cancel / delete */}
-              {editable && editingId === ci.item.id && (
+              {/* Toolbar: save / cancel / delete — only when editingId explicitly set */}
+              {editable && editingId !== null && editingId === ci.item.id && (
                 <div className="mt-2 flex items-center gap-0.5 border-t border-white/[0.06] pt-2 animate-in fade-in duration-150">
                   <button
-                    onClick={() => blockActionsRef.current?.save()}
+                    onClick={() => blockActionsRef.current.get(ci.item.id)?.save()}
                     className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-teal-400 hover:bg-teal-500/10 transition-colors"
                     title="保存修改"
                   >
@@ -746,7 +754,7 @@ export function SceneCard({ scene, selected, editable = false }: SceneCardProps)
                   </button>
                   <button
                     onClick={() => {
-                      blockActionsRef.current?.cancel();
+                      blockActionsRef.current.get(ci.item.id)?.cancel();
                       setEditingId(null);
                     }}
                     className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
