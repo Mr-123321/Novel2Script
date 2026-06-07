@@ -131,9 +131,18 @@ public class PromptTemplate {
             sb.append("---\n请按照以上示例的格式输出。");
         }
 
-        // Append output schema instruction
+        // Append output schema with STRONG JSON format instructions
+        // Weaker models (qwen-turbo) need very explicit formatting guidance
         if (outputSchema != null) {
-            sb.append("\n\n输出格式要求：请严格按照 JSON 格式输出，确保内容可以被 JSON.parse 解析。");
+            sb.append("\n\n---\n## ⚠️ 输出格式要求（必须严格遵守）\n\n");
+            sb.append("1. **只输出纯 JSON** — 不要输出任何解释、说明、问候语或额外文字\n");
+            sb.append("2. **不要用 markdown 代码块** — 不要用 ```json 或 ``` 包裹输出\n");
+            sb.append("3. **使用双引号** — 所有键和字符串值必须用英文双引号 \" 括起来，禁止使用单引号\n");
+            sb.append("4. **不要尾随逗号** — 数组和对象的最后一个元素后面不能有逗号\n");
+            sb.append("5. **确保完整闭合** — 所有括号 {} [] 必须正确匹配闭合\n");
+            sb.append("6. **字符串中的特殊字符需要转义** — 如内容中有双引号请用 \\\" 转义\n");
+            sb.append("7. **null 值直接写 null** — 不要写成 \"null\"（带引号的字符串）\n");
+            sb.append("\n你的回复必须以 { 或 [ 开头，以 } 或 ] 结尾。除此之外什么都不要输出。");
         }
 
         return sb.toString();

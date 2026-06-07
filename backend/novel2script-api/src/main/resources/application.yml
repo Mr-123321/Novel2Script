@@ -65,7 +65,32 @@ mybatis-plus:
             max-tokens: 4096
             stream: true
 
-      qwen:
+      # ── 通义千问多层级模型 ─────────────────────────────
+      # qwen-turbo: 极速廉价，适合简单结构化提取、场景切分
+      # temperature 0.3 确保 JSON 输出稳定性
+      qwen-turbo:
+        api-key: ${QWEN_API_KEY:}
+        base-url: https://dashscope.aliyuncs.com/compatible-mode
+        chat:
+          options:
+            model: qwen-turbo
+            temperature: 0.3
+            max-tokens: 4096
+            stream: true
+
+      # qwen-plus: 均衡性价比，适合对白生成、角色消歧、情节分析
+      qwen-plus:
+        api-key: ${QWEN_API_KEY:}
+        base-url: https://dashscope.aliyuncs.com/compatible-mode
+        chat:
+          options:
+            model: qwen-plus
+            temperature: 0.7
+            max-tokens: 4096
+            stream: true
+
+      # qwen-max: 最强能力，适合复杂创意任务（按需启用）
+      qwen-max:
         api-key: ${QWEN_API_KEY:}
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         chat:

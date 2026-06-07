@@ -13,6 +13,7 @@ import com.novel2script.infrastructure.prompt.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -64,14 +65,12 @@ public class PlotExtractionAgent {
         }
 
         ChatModel model = router.route(TaskType.PLOT_EXTRACTION);
-        String prompt = buildPrompt(chapters, knownCharacters);
+        Prompt prompt = buildPrompt(chapters, knownCharacters);
 
         log.info("PlotExtractionAgent extracting from {} chapters using model={}",
                 chapters.size(), model);
 
-        ChatResponse response = model.call(
-                new org.springframework.ai.chat.prompt.Prompt(
-                        new org.springframework.ai.chat.messages.UserMessage(prompt)));
+        ChatResponse response = model.call(prompt);
 
         List<PlotEvent> events = parseResponse(response, chapters, knownCharacters);
         events = mergeCrossChapterEvents(events);
@@ -149,8 +148,8 @@ public class PlotExtractionAgent {
 
     // ── Prompt construction ─────────────────────────────
 
-    private String buildPrompt(List<Chapter> chapters, List<Character> knownCharacters) {
-        // Try to use registered prompt template
+    private Prompt buildPrompt(List<Chapter> chapters, List<Character> knownCharacters) {
+        // Try to use registered prompt template — use full render() for system+few-shot
         PromptTemplate template = promptRegistry.getLatest("plot-extraction");
         if (template != null) {
             List<Map<String, Object>> chapterList = buildChapterList(chapters);
@@ -160,7 +159,7 @@ public class PlotExtractionAgent {
             vars.put("characters", characterList);
             vars.put("hasCharacters", characterList != null && !characterList.isEmpty());
             vars.put("conflict_types", buildConflictTypeDescriptions());
-            return template.renderUserTemplate(vars);
+            return template.render(vars);
         }
 
         // Fallback: inline prompt
@@ -202,10 +201,11 @@ public class PlotExtractionAgent {
 
     /**
      * Inline prompt builder used when no YAML template is registered.
+     * Returns a full Prompt with system message for JSON format enforcement.
      */
-    private String buildInlinePrompt(List<Chapter> chapters, List<Character> knownCharacters) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("""
+    private Prompt buildInlinePrompt(List<Chapter> chapters, List<Character> knownCharacters) {
+        StringBuilder systemSb = new StringBuilder();
+        systemSb.append("""
                 你是一位专业的叙事分析专家。请从以下小说章节中提取所有关键情节事件。
 
                 ## 提取要求
@@ -233,9 +233,9 @@ public class PlotExtractionAgent {
                 4. **冲突类型定义**:
                 """);
         for (ConflictType ct : ConflictType.values()) {
-            sb.append(String.format("   - %s: %s\n", ct.name(), ct.getLabel()));
+            systemSb.append(String.format("   - %s: %s\n", ct.name(), ct.getLabel()));
         }
-        sb.append("""
+        systemSb.append("""
 
                 5. **情绪弧线方向**:
                    - ↑: 情绪上升（紧张加剧、希望增加）
@@ -250,28 +250,30 @@ public class PlotExtractionAgent {
 
                 """);
 
+        StringBuilder userSb = new StringBuilder();
+
         // Append known characters for reference
         if (knownCharacters != null && !knownCharacters.isEmpty()) {
-            sb.append("## 已知角色列表\n\n");
+            userSb.append("## 已知角色列表\n\n");
             for (Character c : knownCharacters) {
-                sb.append(String.format("- %s (%s): %s\n",
+                userSb.append(String.format("- %s (%s): %s\n",
                         c.getCanonicalName(),
                         c.getRoleType() != null ? c.getRoleType().name() : "未知",
                         c.getDescription() != null ? c.getDescription() : ""));
             }
-            sb.append("\n请务必使用以上准确的角色名作为 participants。\n\n");
+            userSb.append("\n请务必使用以上准确的角色名作为 participants。\n\n");
         }
 
         // Append chapter content
-        sb.append("## 小说章节内容\n\n");
+        userSb.append("## 小说章节内容\n\n");
         for (Chapter ch : chapters) {
-            sb.append(String.format("--- 第%d章 %s ---\n%s\n\n",
+            userSb.append(String.format("--- 第%d章 %s ---\n%s\n\n",
                     ch.getChapterNumber(),
                     ch.getTitle() != null ? ch.getTitle() : "",
                     ch.getContent() != null ? ch.getContent() : ""));
         }
 
-        sb.append("""
+        userSb.append("""
                 ## 输出格式
 
                 请以 JSON 数组格式输出，每个事件如下：
@@ -294,7 +296,9 @@ public class PlotExtractionAgent {
                 请确保输出是有效的 JSON 数组。不要输出额外的注释或说明文字。
                 """);
 
-        return sb.toString();
+        return new Prompt(
+                new org.springframework.ai.chat.messages.SystemMessage(systemSb.toString()),
+                new org.springframework.ai.chat.messages.UserMessage(userSb.toString()));
     }
 
     // ── Response parsing ────────────────────────────────

@@ -3,28 +3,33 @@ package com.novel2script.common.enums;
 /**
  * AI task types mapped to model tiers for automatic routing.
  *
- * <p>Routing strategy:
+ * <p>Routing strategy (Alibaba Qwen multi-tier):
  * <ul>
- *   <li><b>Cheap model</b> — simple structured extraction (chapter parsing, composition)</li>
- *   <li><b>Medium model</b> — batch/analytical tasks (scene segmentation, action generation)</li>
- *   <li><b>Strong model</b> — creative tasks (dialogue, character extraction, plot analysis)</li>
+ *   <li><b>qwen-turbo</b> — fast/cheap: character extraction, scene segmentation,
+ *       action generation, chapter parsing, YAML export</li>
+ *   <li><b>qwen-plus</b> — balanced: dialogue generation, character resolution,
+ *       plot extraction, script composition, storyboard generation</li>
+ *   <li><b>qwen-max</b> — most powerful (available for manual override on any task)</li>
  * </ul>
+ *
+ * <p>Fallback order: task's default provider → global default provider
+ * → <i>any available provider</i>.
  */
 public enum TaskType {
 
-    // ── Primary: Qwen (百炼) ── Fallback: DeepSeek when Qwen unavailable ──
-    CHAPTER_PARSE("qwen"),
-    SCRIPT_COMPOSE("qwen"),
-    YAML_EXPORT("qwen"),
+    // ── qwen-turbo: 极速廉价 — 简单结构化提取、场景切分、动作生成 ──
+    CHAPTER_PARSE("qwen-turbo"),
+    YAML_EXPORT("qwen-turbo"),
+    CHARACTER_EXTRACTION("qwen-turbo"),
+    SCENE_SEGMENT("qwen-turbo"),
+    ACTION_GENERATE("qwen-turbo"),
 
-    CHARACTER_EXTRACTION("qwen"),
-    CHARACTER_RESOLVE("qwen"),
-    PLOT_EXTRACTION("qwen"),
-    DIALOGUE_GENERATE("qwen"),
-    STORYBOARD_GENERATE("qwen"),
-
-    SCENE_SEGMENT("qwen"),
-    ACTION_GENERATE("qwen");
+    // ── qwen-plus: 均衡性价比 — 对白生成、角色消歧、情节分析、剧本合成 ──
+    SCRIPT_COMPOSE("qwen-plus"),
+    CHARACTER_RESOLVE("qwen-plus"),
+    PLOT_EXTRACTION("qwen-plus"),
+    DIALOGUE_GENERATE("qwen-plus"),
+    STORYBOARD_GENERATE("qwen-plus");
 
     private final String defaultProvider;
 
