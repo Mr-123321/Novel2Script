@@ -8,9 +8,13 @@
 
 > 🎬 **演示视频**：[GitHub Releases 下载 / 在线观看](https://github.com/Mr-123321/Novel2Script/releases/tag/v1.0.0)
 >
+> b站：[Novel2Script落墨成戏_哔哩哔哩_bilibili](https://www.bilibili.com/video/BV1CuEh6GE4F/?vd_source=49543edc5a5d3532f10134de55857de3)
+>
 > 夸克网盘地址https://pan.quark.cn/s/6e733d6fab63
+>
+> 
 
-Novel2Script YAML Schema 设计理由：Novel2Script文件夹下
+📐 **设计理念**：[Novel2Script YAML Schema 设计理由](./Novel2Script%20YAML%20Schema%20设计理由.md) — 了解 YAML Schema 的可扩展性、可逆解析、影视剧本规范等核心设计原则
 
 ---
 
