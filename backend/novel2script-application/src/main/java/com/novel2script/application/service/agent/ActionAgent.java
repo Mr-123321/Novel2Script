@@ -173,13 +173,13 @@ public class ActionAgent {
                                     List<Dialogue> dialogues,
                                     List<Character> presentCharacters) {
         ChatModel model = router.route(TaskType.ACTION_GENERATE);
-        String prompt = buildPrompt(scene, dialogues, presentCharacters);
+        Prompt fullPrompt = buildPrompt(scene, dialogues, presentCharacters);
 
         log.debug("ActionAgent: generating actions for scene '{}' with model={}",
                 scene.getTitle(), model);
 
         try {
-            String content = callWithStreaming(model, prompt, ACTION_MAX_TOKENS);
+            String content = callWithStreaming(model, fullPrompt, ACTION_MAX_TOKENS);
             Map<Integer, String> seqToCharName = new HashMap<>();
             List<Action> actions = parseActionsWithNames(content, scene.getId(), seqToCharName);
             return enrichActions(actions, scene, presentCharacters, seqToCharName);
@@ -192,18 +192,32 @@ public class ActionAgent {
 
     /**
      * Call the AI model with SSE streaming, falling back to blocking.
+     * Uses the full Prompt (system + user messages) for proper JSON format guidance.
      */
-    private String callWithStreaming(ChatModel model, String promptText, int maxTokens) {
+    private String callWithStreaming(ChatModel model, Prompt fullPrompt, int maxTokens) {
         String provider = TaskType.ACTION_GENERATE.getDefaultProvider();
         ChatClient streamingClient = streamingChatClients.get(provider);
+
+        // Extract system and user messages from the full prompt
+        String systemText = fullPrompt.getInstructions().stream()
+                .filter(m -> m.getMessageType() == org.springframework.ai.chat.messages.MessageType.SYSTEM)
+                .map(m -> (String) m.getText())
+                .findFirst().orElse(null);
+        String userText = fullPrompt.getInstructions().stream()
+                .filter(m -> m.getMessageType() == org.springframework.ai.chat.messages.MessageType.USER)
+                .map(m -> (String) m.getText())
+                .findFirst().orElse("");
 
         if (streamingClient != null) {
             try {
                 log.debug("ActionAgent: using SSE streaming (maxTokens={})", maxTokens);
                 StringBuilder fullResponse = new StringBuilder();
 
-                var promptBuilder = streamingClient.prompt()
-                        .user(promptText);
+                var promptBuilder = streamingClient.prompt();
+                if (systemText != null && !systemText.isBlank()) {
+                    promptBuilder.system(systemText);
+                }
+                promptBuilder.user(userText);
                 if (maxTokens > 0) {
                     promptBuilder.options(OpenAiChatOptions.builder()
                             .maxTokens(maxTokens).build());
@@ -236,9 +250,8 @@ public class ActionAgent {
 
         // ── Blocking fallback ──
         try {
-            ChatResponse response = model.call(
-                    new Prompt(new org.springframework.ai.chat.messages.UserMessage(promptText)));
-            logTokenUsage(response, promptText);
+            ChatResponse response = model.call(fullPrompt);
+            logTokenUsage(response, userText);
             return response.getResult().getOutput().getText();
         } catch (Exception e) {
             log.error("ActionAgent: blocking call failed: {}", e.getMessage());
@@ -248,15 +261,16 @@ public class ActionAgent {
 
     /**
      * Build the prompt using registered template or inline fallback.
+     * Returns the full Prompt object including system message and JSON format instructions.
      */
-    private String buildPrompt(Scene scene,
+    private Prompt buildPrompt(Scene scene,
                                List<Dialogue> dialogues,
                                List<Character> presentCharacters) {
-        // Try registered prompt template first
+        // Try registered prompt template first — use full render() for system+few-shot
         PromptTemplate template = promptRegistry.getLatest(PROMPT_NAME);
         if (template != null) {
             Map<String, Object> vars = buildTemplateVariables(scene, dialogues, presentCharacters);
-            return template.renderUserTemplate(vars);
+            return template.render(vars);
         }
         return buildInlinePrompt(scene, dialogues, presentCharacters);
     }
@@ -316,12 +330,13 @@ public class ActionAgent {
 
     /**
      * Inline fallback prompt when no YAML template is registered.
+     * Returns a full Prompt with system message for JSON format enforcement.
      */
-    private String buildInlinePrompt(Scene scene,
+    private Prompt buildInlinePrompt(Scene scene,
                                      List<Dialogue> dialogues,
                                      List<Character> presentCharacters) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("""
+        StringBuilder systemSb = new StringBuilder();
+        systemSb.append("""
                 你是一位专业的影视动作指导。请为以下场景生成可视化、可拍摄的动作描述。
 
                 ## 核心规则
@@ -342,42 +357,43 @@ public class ActionAgent {
 
                 """);
 
-        sb.append("## 场景信息\n\n");
-        sb.append("- 标题: ").append(scene.getTitle() != null ? scene.getTitle() : "无").append("\n");
-        sb.append("- 地点: ").append(scene.getLocation() != null ? scene.getLocation() : "未知").append("\n");
-        sb.append("- 时间: ").append(scene.getTimeOfDay() != null
+        StringBuilder userSb = new StringBuilder();
+        userSb.append("## 场景信息\n\n");
+        userSb.append("- 标题: ").append(scene.getTitle() != null ? scene.getTitle() : "无").append("\n");
+        userSb.append("- 地点: ").append(scene.getLocation() != null ? scene.getLocation() : "未知").append("\n");
+        userSb.append("- 时间: ").append(scene.getTimeOfDay() != null
                 ? scene.getTimeOfDay().getScriptLabel() : "UNKNOWN").append("\n");
-        sb.append("- 景别: ").append(scene.isInterior() ? "INT" : "EXT").append("\n");
-        sb.append("- 氛围: ").append(scene.getMood() != null ? scene.getMood() : "中性").append("\n");
-        sb.append("- 概要: ").append(scene.getSummary() != null ? scene.getSummary() : "").append("\n\n");
+        userSb.append("- 景别: ").append(scene.isInterior() ? "INT" : "EXT").append("\n");
+        userSb.append("- 氛围: ").append(scene.getMood() != null ? scene.getMood() : "中性").append("\n");
+        userSb.append("- 概要: ").append(scene.getSummary() != null ? scene.getSummary() : "").append("\n\n");
 
         if (presentCharacters != null && !presentCharacters.isEmpty()) {
-            sb.append("## 出场角色\n\n");
+            userSb.append("## 出场角色\n\n");
             for (Character c : presentCharacters) {
-                sb.append("- **").append(c.getCanonicalName()).append("** (")
+                userSb.append("- **").append(c.getCanonicalName()).append("** (")
                         .append(c.getRoleType() != null ? c.getRoleType().name() : "UNKNOWN")
                         .append(")");
                 if (c.getDescription() != null && !c.getDescription().isBlank()) {
-                    sb.append(": ").append(c.getDescription());
+                    userSb.append(": ").append(c.getDescription());
                 }
-                sb.append("\n");
+                userSb.append("\n");
             }
-            sb.append("\n");
+            userSb.append("\n");
         }
 
         if (dialogues != null && !dialogues.isEmpty()) {
-            sb.append("## 对话\n\n");
+            userSb.append("## 对话\n\n");
             for (Dialogue d : dialogues) {
-                sb.append("- **").append(d.getSpeaker()).append("**: ").append(d.getContent());
+                userSb.append("- **").append(d.getSpeaker()).append("**: ").append(d.getContent());
                 if (d.getEmotion() != null) {
-                    sb.append(" [").append(d.getEmotion().getChineseLabel()).append("]");
+                    userSb.append(" [").append(d.getEmotion().getChineseLabel()).append("]");
                 }
-                sb.append("\n");
+                userSb.append("\n");
             }
-            sb.append("\n");
+            userSb.append("\n");
         }
 
-        sb.append("""
+        userSb.append("""
                 ## 输出格式
 
                 以 JSON 格式输出：
@@ -395,7 +411,9 @@ public class ActionAgent {
                 请确保输出是有效的 JSON。
                 """);
 
-        return sb.toString();
+        return new Prompt(
+                new org.springframework.ai.chat.messages.SystemMessage(systemSb.toString()),
+                new org.springframework.ai.chat.messages.UserMessage(userSb.toString()));
     }
 
     // ──────────────────────────────────────────────────

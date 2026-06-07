@@ -14,6 +14,7 @@ import com.novel2script.infrastructure.prompt.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -94,21 +95,20 @@ public class SceneAgent {
                                   List<PlotEvent> plotEvents,
                                   List<Character> characters) {
         ChatModel model = router.route(TaskType.SCENE_SEGMENT);
-        String prompt = buildPrompt(chapters, plotEvents, characters);
+        Prompt prompt = buildPrompt(chapters, plotEvents, characters);
 
         log.info("SceneAgent segmenting {} chapters using model={}", chapters.size(), model);
 
-        ChatResponse response = model.call(
-                new org.springframework.ai.chat.prompt.Prompt(
-                        new org.springframework.ai.chat.messages.UserMessage(prompt)));
+        ChatResponse response = model.call(prompt);
 
         return parseResponse(response);
     }
 
-    private String buildPrompt(List<Chapter> chapters,
+    private Prompt buildPrompt(List<Chapter> chapters,
                                List<PlotEvent> plotEvents,
                                List<Character> characters) {
-        // Try registered prompt template first
+        // Try registered prompt template first — use full render() to include
+        // system prompt, few-shot examples, and JSON format instructions
         PromptTemplate template = promptRegistry.getLatest("scene-segmentation");
         if (template != null) {
             List<Map<String, Object>> chapterList = buildChapterList(chapters);
@@ -120,8 +120,9 @@ public class SceneAgent {
             vars.put("hasCharacters", characterList != null && !characterList.isEmpty());
             vars.put("events", eventList);
             vars.put("hasEvents", eventList != null && !eventList.isEmpty());
-            return template.renderUserTemplate(vars);
+            return template.render(vars);
         }
+        // Fallback: inline prompt with system message for JSON format
         return buildInlinePrompt(chapters, plotEvents, characters);
     }
 
@@ -165,12 +166,13 @@ public class SceneAgent {
 
     /**
      * Inline prompt builder for fallback when no YAML template is registered.
+     * Returns a full Prompt with system message for JSON format enforcement.
      */
-    private String buildInlinePrompt(List<Chapter> chapters,
+    private Prompt buildInlinePrompt(List<Chapter> chapters,
                                      List<PlotEvent> plotEvents,
                                      List<Character> characters) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("""
+        StringBuilder systemSb = new StringBuilder();
+        systemSb.append("""
                 你是一位专业的影视编剧专家。请将以下小说内容切分为影视场景。
 
                 ## 核心原则
@@ -211,28 +213,30 @@ public class SceneAgent {
 
                 """);
 
+        StringBuilder userSb = new StringBuilder();
+
         // Known characters
         if (characters != null && !characters.isEmpty()) {
-            sb.append("## 已知角色\n\n");
+            userSb.append("## 已知角色\n\n");
             for (Character c : characters) {
-                sb.append(String.format("- %s (%s): %s\n",
+                userSb.append(String.format("- %s (%s): %s\n",
                         c.getCanonicalName(),
                         c.getRoleType() != null ? c.getRoleType().name() : "未知",
                         c.getDescription() != null ? c.getDescription() : ""));
             }
-            sb.append("\n");
+            userSb.append("\n");
         }
 
         // Chapter content
-        sb.append("## 小说内容\n\n");
+        userSb.append("## 小说内容\n\n");
         for (Chapter ch : chapters) {
-            sb.append(String.format("### 第%d章 %s\n%s\n\n",
+            userSb.append(String.format("### 第%d章 %s\n%s\n\n",
                     ch.getChapterNumber(),
                     ch.getTitle() != null ? ch.getTitle() : "",
                     ch.getContent() != null ? ch.getContent() : ""));
         }
 
-        sb.append("""
+        userSb.append("""
                 ## 输出格式
 
                 以 JSON 数组格式输出：
@@ -255,7 +259,9 @@ public class SceneAgent {
                 请确保输出是有效的 JSON 数组。
                 """);
 
-        return sb.toString();
+        return new Prompt(
+                new org.springframework.ai.chat.messages.SystemMessage(systemSb.toString()),
+                new org.springframework.ai.chat.messages.UserMessage(userSb.toString()));
     }
 
     // ── AI Response Parsing ─────────────────────────────
