@@ -54,12 +54,29 @@
         <div class="script-card-footer">
           <button
             class="btn-delete"
-            @click.stop="handleDelete(script)"
-          >删除</button>
+            @click.stop="confirmDelete(script)"
+          >🗑 删除</button>
           <span class="script-date">{{ formatDate(script.createdAt) }}</span>
         </div>
       </div>
     </div>
+
+    <!-- Delete Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="deletingScript" class="modal-overlay" @click.self="cancelDelete">
+        <div class="modal-box">
+          <div class="modal-icon">⚠️</div>
+          <h3 class="modal-title">确认删除</h3>
+          <p class="modal-body">
+            确定要删除剧本<br />「<strong>{{ deletingScript.title }}</strong>」吗？<br />此操作不可撤销。
+          </p>
+          <div class="modal-actions">
+            <button class="modal-btn modal-btn--cancel" @click="cancelDelete">取消</button>
+            <button class="modal-btn modal-btn--danger" @click="handleDelete(deletingScript)">确认删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -74,6 +91,7 @@ const router = useRouter()
 const scripts = ref<Script[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
+const deletingScript = ref<Script | null>(null)
 
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
@@ -99,6 +117,14 @@ async function fetchScripts() {
   }
 }
 
+function confirmDelete(script: Script) {
+  deletingScript.value = script
+}
+
+function cancelDelete() {
+  deletingScript.value = null
+}
+
 async function handleDelete(script: Script) {
   try {
     await deleteScriptApi(script.id)
@@ -106,6 +132,8 @@ async function handleDelete(script: Script) {
     toast.success('剧本已删除')
   } catch {
     toast.error('删除失败')
+  } finally {
+    deletingScript.value = null
   }
 }
 
@@ -294,5 +322,100 @@ onMounted(fetchScripts)
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.5;
+}
+
+/* Delete confirmation modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-box {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: var(--shadow-float);
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.modal-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.modal-title {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.modal-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+.modal-body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-btn {
+  padding: 8px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.modal-btn--cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.modal-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.modal-btn--danger {
+  background: var(--cinnabar);
+  color: #fff;
+}
+
+.modal-btn--danger:hover {
+  background: #d44a2a;
+  box-shadow: 0 0 16px rgba(194, 59, 34, 0.4);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
 </style>

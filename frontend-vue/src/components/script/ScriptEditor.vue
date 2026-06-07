@@ -54,10 +54,33 @@
           </div>
         </div>
 
+        <button
+          class="toolbar-delete-btn"
+          @click="confirmingDelete = true"
+          title="删除剧本"
+        >🗑</button>
+
         <button class="toolbar-icon-btn" @click="rightOpen = !rightOpen" title="切换角色面板">
           ▶
         </button>
       </div>
+
+      <!-- Delete Confirmation Modal -->
+      <Teleport to="body">
+        <div v-if="confirmingDelete" class="modal-overlay" @click.self="confirmingDelete = false">
+          <div class="modal-box">
+            <div class="modal-icon">⚠️</div>
+            <h3 class="modal-title">确认删除</h3>
+            <p class="modal-body">
+              确定要删除剧本<br />「<strong>{{ script?.title }}</strong>」吗？<br />此操作不可撤销。
+            </p>
+            <div class="modal-actions">
+              <button class="modal-btn modal-btn--cancel" @click="confirmingDelete = false">取消</button>
+              <button class="modal-btn modal-btn--danger" @click="handleDelete">确认删除</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
 
       <div class="script-scroll">
         <!-- Insertions before first scene (position 0) -->
@@ -118,8 +141,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { useScriptStore } from '@/stores/script'
-import { downloadScriptYaml, downloadScriptTxt, downloadScriptMd } from '@/lib/api'
+import { downloadScriptYaml, downloadScriptTxt, downloadScriptMd, deleteScript } from '@/lib/api'
 import { generateMdContent } from '@/lib/utils'
 import { toast } from '@/stores/toast'
 import SceneList from './SceneList.vue'
@@ -127,13 +151,29 @@ import SceneCard from './SceneCard.vue'
 import CharacterPanel from './CharacterPanel.vue'
 import type { PlotInsertion } from '@/types/script'
 
+const router = useRouter()
+
 const store = useScriptStore()
 
 const leftOpen = ref(true)
 const rightOpen = ref(true)
 const editMode = ref(false)
 const downloadOpen = ref(false)
+const confirmingDelete = ref(false)
 const mainRef = ref<HTMLElement | null>(null)
+
+async function handleDelete() {
+  if (!script.value) return
+  try {
+    await deleteScript(script.value.id)
+    toast.success('剧本已删除')
+    router.push('/scripts')
+  } catch {
+    toast.error('删除失败')
+  } finally {
+    confirmingDelete.value = false
+  }
+}
 const sceneRefs = new Map<number, HTMLElement>()
 const hasScrolled = ref(false)
 
@@ -344,6 +384,118 @@ watch(() => store.selectedSceneId, (id) => {
 .toolbar-icon-btn:hover {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.06);
+}
+
+.toolbar-delete-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  background: transparent;
+  margin-left: 8px;
+}
+
+.toolbar-delete-btn:hover {
+  color: var(--cinnabar);
+  background: var(--cinnabar-surface);
+}
+
+/* Delete confirmation modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-box {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: var(--shadow-float);
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.modal-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.modal-title {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.modal-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+.modal-body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-btn {
+  padding: 8px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.modal-btn--cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.modal-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.modal-btn--danger {
+  background: var(--cinnabar);
+  color: #fff;
+}
+
+.modal-btn--danger:hover {
+  background: #d44a2a;
+  box-shadow: 0 0 16px rgba(194, 59, 34, 0.4);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .script-title {
