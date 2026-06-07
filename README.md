@@ -8,7 +8,7 @@
 
 > 🎬 **演示视频**：[GitHub Releases 下载 / 在线观看](https://github.com/Mr-123321/Novel2Script/releases/tag/v1.0.0)
 >
-> 夸克网盘地址https://pan.quark.cn/s/d7715dec682d
+> 夸克网盘地址https://pan.quark.cn/s/6e733d6fab63
 
 ---
 
