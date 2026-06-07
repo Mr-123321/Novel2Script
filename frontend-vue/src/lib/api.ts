@@ -118,6 +118,20 @@ export async function downloadScriptYaml(id: number): Promise<Blob> {
   return res.blob();
 }
 
+/** Download TXT file as blob */
+export async function downloadScriptTxt(id: number): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/exports/${id}/txt/download`);
+  if (!res.ok) throw new Error('Download failed');
+  return res.blob();
+}
+
+/** Download Markdown file as blob */
+export async function downloadScriptMd(id: number): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/exports/${id}/md/download`);
+  if (!res.ok) throw new Error('Download failed');
+  return res.blob();
+}
+
 // ==================== Workflow ====================
 
 /** Get Mermaid workflow diagram */
@@ -242,25 +256,44 @@ export function subscribeProgress(
     `${BASE_URL}/scripts/${scriptId}/progress`
   );
 
+  // Guard against double-fire: once settled (complete/error), ignore onerror
+  let settled = false;
+
   eventSource.addEventListener('progress', (event: MessageEvent) => {
     const data: WorkflowProgress = JSON.parse(event.data);
     onProgress(data);
   });
 
-  eventSource.addEventListener('complete', (event: MessageEvent) => {
-    const data = JSON.parse(event.data);
+  eventSource.addEventListener('complete', (event: Event) => {
+    // Only handle server-sent events (MessageEvent with .data).
+    // Browser-native events of the same name have no .data — skip them.
+    if (!('data' in event)) return;
+    settled = true;
+    const data = JSON.parse((event as MessageEvent).data);
     eventSource.close();
     onComplete?.(data);
   });
 
   eventSource.addEventListener('error', (event: Event) => {
+    // CRITICAL: EventSource.addEventListener('error', ...) catches BOTH:
+    //   a) Server-sent "event: error" named events → MessageEvent with .data
+    //   b) Browser-native error events              → plain Event, no .data
+    // Only server-sent errors (backend FAILED status) should go to onError.
+    // Browser-native errors are handled by onerror below (with readyState check).
+    if (!('data' in event)) return;
+    settled = true;
     eventSource.close();
     onError?.(event);
   });
 
-  // Fallback onerror for connection issues
+  // Native onerror: fires for connection-level issues.
+  // During initial connection / reconnection, readyState is CONNECTING (0) — ignore those.
+  // Only treat CLOSED (2) as a real failure.
   eventSource.onerror = (event) => {
-    onError?.(event);
+    if (settled) return;
+    if (eventSource.readyState === EventSource.CLOSED) {
+      onError?.(event);
+    }
   };
 
   return eventSource;

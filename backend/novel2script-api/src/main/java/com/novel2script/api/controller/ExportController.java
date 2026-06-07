@@ -65,4 +65,54 @@ public class ExportController {
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(yamlBytes.length))
                 .body(resource);
     }
+
+    @GetMapping("/{scriptId}/txt/download")
+    @Operation(summary = "下载剧本的 TXT 文本文件")
+    public ResponseEntity<Resource> downloadTxt(@PathVariable Long scriptId) {
+        String txtContent = scriptService.getTxt(scriptId);
+
+        if (txtContent == null || txtContent.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        byte[] txtBytes = txtContent.getBytes(StandardCharsets.UTF_8);
+        ByteArrayResource resource = new ByteArrayResource(txtBytes);
+
+        String title = scriptService.findById(scriptId)
+                .map(s -> s.getTitle())
+                .orElse("script");
+        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_");
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + safeTitle + ".txt\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(txtBytes.length))
+                .body(resource);
+    }
+
+    @GetMapping("/{scriptId}/md/download")
+    @Operation(summary = "下载剧本的 Markdown 文件")
+    public ResponseEntity<Resource> downloadMd(@PathVariable Long scriptId) {
+        String mdContent = scriptService.getMd(scriptId);
+
+        if (mdContent == null || mdContent.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        byte[] mdBytes = mdContent.getBytes(StandardCharsets.UTF_8);
+        ByteArrayResource resource = new ByteArrayResource(mdBytes);
+
+        String title = scriptService.findById(scriptId)
+                .map(s -> s.getTitle())
+                .orElse("script");
+        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_");
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/markdown; charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + safeTitle + ".md\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(mdBytes.length))
+                .body(resource);
+    }
 }

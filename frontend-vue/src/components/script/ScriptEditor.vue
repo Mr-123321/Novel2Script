@@ -30,6 +30,30 @@
           >✏️ 编辑</button>
         </div>
 
+        <!-- Download dropdown (only when completed) -->
+        <div v-if="script?.status === 'COMPLETED'" class="toolbar-downloads">
+          <button class="download-btn" @click="downloadOpen = !downloadOpen">
+            📥 下载
+          </button>
+          <div v-if="downloadOpen" class="download-menu">
+            <button class="download-menu-item" @click="handleDownload('txt')">
+              <span class="menu-item-icon">📄</span>
+              <span class="menu-item-label">TXT 文本</span>
+              <span class="menu-item-hint">纯文本剧本</span>
+            </button>
+            <button class="download-menu-item" @click="handleDownload('md')">
+              <span class="menu-item-icon">📝</span>
+              <span class="menu-item-label">Markdown</span>
+              <span class="menu-item-hint">带格式标记</span>
+            </button>
+            <button class="download-menu-item" @click="handleDownload('yaml')">
+              <span class="menu-item-icon">📋</span>
+              <span class="menu-item-label">YAML</span>
+              <span class="menu-item-hint">结构化数据</span>
+            </button>
+          </div>
+        </div>
+
         <button class="toolbar-icon-btn" @click="rightOpen = !rightOpen" title="切换角色面板">
           ▶
         </button>
@@ -93,8 +117,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useScriptStore } from '@/stores/script'
+import { downloadScriptYaml, downloadScriptTxt, downloadScriptMd } from '@/lib/api'
+import { generateMdContent } from '@/lib/utils'
+import { toast } from '@/stores/toast'
 import SceneList from './SceneList.vue'
 import SceneCard from './SceneCard.vue'
 import CharacterPanel from './CharacterPanel.vue'
@@ -105,6 +132,7 @@ const store = useScriptStore()
 const leftOpen = ref(true)
 const rightOpen = ref(true)
 const editMode = ref(false)
+const downloadOpen = ref(false)
 const mainRef = ref<HTMLElement | null>(null)
 const sceneRefs = new Map<number, HTMLElement>()
 const hasScrolled = ref(false)
@@ -131,6 +159,85 @@ const insertionsAtStart = computed(() =>
 function getInsertionsAfter(idx: number): PlotInsertion[] {
   return insertions.value.filter((ins) => ins.position === idx + 1)
 }
+
+// ── Download handlers ──
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+const FORMAT_LABELS: Record<string, string> = { txt: 'TXT', md: 'Markdown', yaml: 'YAML' }
+
+async function handleDownload(format: 'txt' | 'md' | 'yaml') {
+  downloadOpen.value = false
+  if (!store.script?.id) return
+  const sid = store.script.id
+  const title = store.script.title?.replace(/[\\\\/:*?\"<>|]/g, '_') ?? 'script'
+  const label = FORMAT_LABELS[format]
+
+  try {
+    if (format === 'txt') {
+      const blob = await downloadScriptTxt(sid)
+      triggerBlobDownload(blob, `${title}.txt`)
+    } else if (format === 'md') {
+      let blob: Blob
+      try {
+        blob = await downloadScriptMd(sid)
+      } catch {
+        // Fallback: generate Markdown on the client side
+        const md = generateMdContent({
+          title: store.script.title ?? '未命名剧本',
+          scenes: store.script.scenes ?? [],
+          characters: (store.script.characters ?? []).map((c) => ({
+            id: c.id,
+            canonicalName: c.canonicalName,
+          })),
+        })
+        blob = new Blob([md], { type: 'text/markdown; charset=UTF-8' })
+      }
+      triggerBlobDownload(blob, `${title}.md`)
+    } else if (format === 'yaml') {
+      let blob: Blob
+      try {
+        blob = await downloadScriptYaml(sid)
+      } catch {
+        const yaml = store.script.yamlContent
+        if (yaml) {
+          blob = new Blob([yaml], { type: 'text/yaml' })
+        } else {
+          throw new Error('no yaml')
+        }
+      }
+      triggerBlobDownload(blob, `${title}.yaml`)
+    }
+    toast.success(`${label} 下载开始`)
+  } catch {
+    toast.error(`${label} 下载失败，请稍后重试`)
+  }
+}
+
+// Click outside to close dropdown
+function onDocumentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.toolbar-downloads')) {
+    downloadOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 
 // Scroll to selected scene on mount
 onMounted(() => {
@@ -280,6 +387,91 @@ watch(() => store.selectedSceneId, (id) => {
   background: var(--teal-surface);
   color: var(--teal-primary);
   box-shadow: inset 0 1px 0 rgba(61, 184, 176, 0.08);
+}
+
+/* Download buttons */
+.toolbar-downloads {
+  position: relative;
+}
+
+.download-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.download-btn:hover {
+  color: var(--teal-primary);
+  background: var(--teal-surface);
+  border-color: rgba(61, 184, 176, 0.15);
+}
+
+/* Dropdown menu */
+.download-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--ink-deep-elevated);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  backdrop-filter: blur(16px);
+  z-index: 100;
+  animation: dropdownIn 0.15s ease-out;
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.download-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.download-menu-item:hover {
+  background: var(--teal-surface);
+  color: var(--text-primary);
+}
+
+.menu-item-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+
+.menu-item-label {
+  font-weight: 500;
+  flex: 1;
+}
+
+.menu-item-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 /* Script scroll area */

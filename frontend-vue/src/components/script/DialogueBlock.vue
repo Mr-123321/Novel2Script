@@ -155,6 +155,8 @@ function handleCancel() {
 }
 
 async function handleDelete() {
+  if (!window.confirm('确定删除此对话吗？')) return
+
   if (!store.script?.id) {
     toast.warning('无法获取剧本信息，请刷新后重试')
     return

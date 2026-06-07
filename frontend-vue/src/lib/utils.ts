@@ -87,3 +87,137 @@ export function formatTimeOfDay(timeOfDay: string): string {
 export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
 }
+
+// ── Client-side Markdown generation (fallback when backend endpoint unavailable) ──
+
+interface MdScene {
+  sceneNumber: number
+  location?: string
+  timeOfDay?: string
+  interior?: boolean
+  title?: string
+  mood?: string
+  summary?: string
+  characterIds?: number[]
+  dialogues: Array<{
+    speaker: string
+    emotion?: string
+    content: string
+    parenthetical?: string
+    sequence: number
+  }>
+  actions: Array<{
+    actionType: string
+    description: string
+    durationMs?: number
+    sequence: number
+  }>
+}
+
+interface MdCharacter {
+  id: number
+  canonicalName: string
+}
+
+interface MdScriptData {
+  title: string
+  scenes: MdScene[]
+  characters: MdCharacter[]
+}
+
+export function generateMdContent(data: MdScriptData): string {
+  const lines: string[] = []
+
+  // Title
+  lines.push(`# 《${data.title || '未命名剧本'}》`)
+  lines.push('')
+
+  if (!data.scenes || data.scenes.length === 0) {
+    lines.push('> （暂无场景内容）')
+    return lines.join('\n')
+  }
+
+  const charMap = new Map<number, string>()
+  for (const c of data.characters) {
+    charMap.set(c.id, c.canonicalName)
+  }
+
+  for (const scene of data.scenes) {
+    lines.push('---')
+    lines.push('')
+
+    // Scene heading
+    let heading = `## 场景 ${scene.sceneNumber}`
+    const loc = scene.location || '未知地点'
+    const timeStr = scene.timeOfDay && scene.timeOfDay !== 'UNKNOWN'
+      ? ` - ${scene.timeOfDay}` : ''
+    heading += `：${loc}${timeStr}`
+    if (scene.title) heading += ` — ${scene.title}`
+    lines.push(heading)
+    lines.push('')
+
+    // Characters
+    if (scene.characterIds && scene.characterIds.length > 0) {
+      const names = scene.characterIds
+        .map((id) => charMap.get(id))
+        .filter((n): n is string => !!n)
+      if (names.length > 0) {
+        lines.push(`**出场角色**：${names.join('、')}`)
+        lines.push('')
+      }
+    }
+
+    // Mood
+    if (scene.mood) {
+      lines.push(`**场景氛围**：${scene.mood}`)
+      lines.push('')
+    }
+
+    // Summary
+    if (scene.summary) {
+      lines.push(`> ${scene.summary}`)
+      lines.push('')
+    }
+
+    // Content items (dialogues + actions, sorted by sequence)
+    const items = [
+      ...(scene.dialogues || []).map((d) => ({ type: 'dialogue' as const, seq: d.sequence, data: d })),
+      ...(scene.actions || []).map((a) => ({ type: 'action' as const, seq: a.sequence, data: a })),
+    ]
+    items.sort((a, b) => a.seq - b.seq)
+
+    for (const item of items) {
+      if (item.type === 'dialogue') {
+        const d = item.data as MdScene['dialogues'][number]
+        let line = `**${d.speaker}**`
+        if (d.emotion && d.emotion !== 'NEUTRAL') {
+          line += `（${emotionLabel(d.emotion)}）`
+        }
+        if (d.parenthetical) {
+          line += `（${d.parenthetical}）`
+        }
+        line += `："${d.content}"`
+        lines.push(line)
+        lines.push('')
+      } else {
+        const a = item.data as MdScene['actions'][number]
+        const typeLabel = actionTypeLabelMd(a.actionType)
+        let line = `*[${typeLabel}]* ${a.description}`
+        if (a.durationMs && a.durationMs > 0) {
+          line += ` （约${(a.durationMs / 1000).toFixed(1)}秒）`
+        }
+        lines.push(line)
+        lines.push('')
+      }
+    }
+  }
+
+  return lines.join('\n')
+}
+
+function actionTypeLabelMd(type: string): string {
+  const labels: Record<string, string> = {
+    ACTION: '动作', REACTION: '反应', BEAT: '节拍', BUSINESS: '调度',
+  }
+  return labels[type] ?? type
+}
