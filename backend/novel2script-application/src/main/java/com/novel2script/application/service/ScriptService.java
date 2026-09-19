@@ -348,32 +348,67 @@ public class ScriptService {
      * <ul>
      *   <li>no failures → {@link ScriptStatus#COMPLETED}</li>
      *   <li>some scenes failed dialogue/action generation →
-     *       {@link ScriptStatus#PARTIAL} (content is kept, gaps are flagged
-     *       as 待补全 — never filled with fabricated data)</li>
+     *       {@link ScriptStatus#COMPLETED_WITH_WARNINGS} (content is kept,
+     *       gaps are flagged as 待补全 — never filled with fabricated data)</li>
      * </ul>
      */
     @Transactional
     public void completeScript(Long scriptId) {
         Script script = scriptMapper.selectById(scriptId);
         if (script == null) return;
-        script.setProgress(100.0);
-        script.setStatus(hasGenerationGaps(script) ? ScriptStatus.PARTIAL : ScriptStatus.COMPLETED);
+        Map<String, Object> ws = script.getWorkflowState();
+        int failedDialogues = ws == null ? 0 : readPositive(ws.get("failedDialogueScenes"));
+        int failedActions = ws == null ? 0 : readPositive(ws.get("failedActionScenes"));
+        finalizeScript(script, failedDialogues, failedActions);
+    }
+
+    /**
+     * Mark generation as finished <em>with warnings</em>: some scenes' dialogue
+     * and/or action generation failed, so those scenes are intentionally left
+     * empty for manual completion (nothing fabricated). The script is still
+     * finished — progress 100 and status {@link ScriptStatus#COMPLETED_WITH_WARNINGS} —
+     * so the successfully generated content is kept and remains exportable.
+     *
+     * @param scriptId            target script
+     * @param failedDialogueScenes number of scenes whose dialogue generation failed
+     * @param failedActionScenes   number of scenes whose action generation failed
+     */
+    @Transactional
+    public void completeWithWarnings(Long scriptId, int failedDialogueScenes, int failedActionScenes) {
+        Script script = scriptMapper.selectById(scriptId);
+        if (script == null) {
+            throw new BusinessException("SCRIPT_NOT_FOUND", "剧本不存在: " + scriptId);
+        }
+        finalizeScript(script, failedDialogueScenes, failedActionScenes);
+    }
+
+    /**
+     * Shared terminal handling: set status (COMPLETED vs COMPLETED_WITH_WARNINGS),
+     * persist the failed-scene counters into workflowState, regenerate the final
+     * YAML and save. Warnings are only attached when there is at least one gap.
+     */
+    private void finalizeScript(Script script, int failedDialogueScenes, int failedActionScenes) {
+        boolean withWarnings = failedDialogueScenes > 0 || failedActionScenes > 0;
+        if (withWarnings) {
+            script.completeWithWarnings();
+            Map<String, Object> ws = script.getWorkflowState();
+            if (ws == null) {
+                ws = new LinkedHashMap<>();
+                script.setWorkflowState(ws);
+            }
+            ws.put("failedDialogueScenes", failedDialogueScenes);
+            ws.put("failedActionScenes", failedActionScenes);
+        } else {
+            script.complete();
+        }
         // Generate final YAML
-        Script fullScript = findById(scriptId).orElse(script);
+        Script fullScript = findById(script.getId()).orElse(script);
         script.setYamlContent(generateYaml(fullScript));
         script.setUpdatedAt(LocalDateTime.now());
         scriptMapper.updateById(script);
-        log.info("Script finished: id={}, status={}, title='{}', scenes={}, characters={}",
-                scriptId, script.getStatus(), script.getTitle(),
-                script.getSceneCount(), script.getCharacterCount());
-    }
-
-    /** True when workflowState records scenes whose dialogue/action generation failed. */
-    private boolean hasGenerationGaps(Script script) {
-        Map<String, Object> ws = script.getWorkflowState();
-        if (ws == null) return false;
-        return readPositive(ws.get("failedDialogueScenes")) > 0
-                || readPositive(ws.get("failedActionScenes")) > 0;
+        log.info("Script finished: id={}, status={}, failedDialogues={}, failedActions={}, title='{}', scenes={}, characters={}",
+                script.getId(), script.getStatus(), failedDialogueScenes, failedActionScenes,
+                script.getTitle(), script.getSceneCount(), script.getCharacterCount());
     }
 
     private int readPositive(Object value) {

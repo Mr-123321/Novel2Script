@@ -50,10 +50,10 @@ public class SseProgressListener {
         Script script = scriptOpt.get();
         ScriptStatus status = script.getStatus();
 
-        if (status == ScriptStatus.COMPLETED || status == ScriptStatus.PARTIAL) {
+        if (status == ScriptStatus.COMPLETED || status == ScriptStatus.COMPLETED_WITH_WARNINGS) {
             // Send final progress snapshot, then complete event, then close all connections.
-            // PARTIAL = finished, but some scenes were left empty (待补全) instead of
-            // being padded with fabricated content.
+            // COMPLETED_WITH_WARNINGS = finished, but some scenes were left empty (待补全)
+            // instead of being padded with fabricated content.
             sendProgress(script);
             Map<String, Object> payload = new java.util.LinkedHashMap<>();
             payload.put("scriptId", scriptId);

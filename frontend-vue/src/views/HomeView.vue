@@ -142,7 +142,7 @@ function statusLabel(status: string): string {
     GENERATING: '生成中',
     DRAFT: '草稿',
     FAILED: '失败',
-    PARTIAL: '部分完成（待补全）',
+    COMPLETED_WITH_WARNINGS: '部分完成（待补全）',
   }
   return labels[status] ?? status
 }
@@ -288,7 +288,7 @@ onMounted(async () => {
 .status-generating { background: var(--warm-gold-surface); color: var(--warm-gold); }
 .status-draft { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
 .status-failed { background: var(--cinnabar-surface); color: var(--cinnabar); }
-.status-partial { background: var(--warm-gold-surface); color: var(--warm-gold-light); }
+.status-completed_with_warnings { background: var(--warm-gold-surface); color: var(--warm-gold-light); }
 
 /* Delete confirmation modal */
 .modal-overlay {

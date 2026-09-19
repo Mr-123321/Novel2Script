@@ -15,12 +15,11 @@ public enum ScriptStatus {
     COMPLETED,
 
     /**
-     * Generation finished, but some content could not be produced by AI
-     * (e.g. scenes whose dialogue/action generation failed).
-     * Those scenes are left empty and flagged for manual completion —
-     * nothing is fabricated to fill the gap.
+     * 生成完成，但有部分场景的对白/动作生成失败，需人工补全。
+     * <p>Those scenes are left empty and flagged for manual completion —
+     * nothing is fabricated to fill the gap. The script is still exportable.
      */
-    PARTIAL,
+    COMPLETED_WITH_WARNINGS,
 
     /** Generation failed with errors */
     FAILED

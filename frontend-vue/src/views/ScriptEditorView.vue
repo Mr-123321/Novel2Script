@@ -9,14 +9,14 @@
       />
     </div>
 
-    <!-- Partial generation banner (finished, but some scenes are 待补全) -->
-    <div v-if="!generationError && script?.status === 'PARTIAL'" class="partial-banner">
+    <!-- Completed-with-warnings banner (finished, but some scenes are 待补全) -->
+    <div v-if="!generationError && script?.status === 'COMPLETED_WITH_WARNINGS'" class="warnings-banner">
       <span class="banner-icon">✎</span>
       <div class="banner-body">
         <p class="banner-title">生成完成，但有部分场景未能生成</p>
         <p class="banner-detail">
           对白缺失 {{ failedDialogueScenes }} 个场景<span v-if="failedActionScenes > 0">，动作缺失 {{ failedActionScenes }} 个场景</span>。
-          系统未编造任何台词或动作，请人工补全后再使用。
+          系统未编造任何台词或动作，请手动补全后再使用（YAML 仍可正常导出）。
         </p>
       </div>
     </div>
@@ -152,7 +152,7 @@ watch(() => store.script?.status, (status) => {
   if (status === 'GENERATING') {
     startProgressSimulation()
   }
-  if (status === 'COMPLETED' || status === 'PARTIAL' || status === 'FAILED') {
+  if (status === 'COMPLETED' || status === 'COMPLETED_WITH_WARNINGS' || status === 'FAILED') {
     resolved.value = true
     displayProgress.value = 100
     hideProgressTimeout = setTimeout(() => {
@@ -217,7 +217,7 @@ const showProgressOverlay = computed(() =>
   font-size: 13px;
 }
 
-.partial-banner {
+.warnings-banner {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -228,11 +228,11 @@ const showProgressOverlay = computed(() =>
   font-size: 13px;
 }
 
-.partial-banner .banner-title {
+.warnings-banner .banner-title {
   color: var(--warm-gold-light);
 }
 
-.partial-banner .banner-detail {
+.warnings-banner .banner-detail {
   color: var(--text-secondary);
 }
 

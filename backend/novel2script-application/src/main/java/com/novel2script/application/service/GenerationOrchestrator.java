@@ -358,7 +358,7 @@ public class GenerationOrchestrator {
         }
 
         // Dialogue generation — Tier 1: AI, Tier 2: regex extraction from source,
-        // Tier 3: explicit failure (NO mock fabrication — scenes stay empty)
+        // Tier 3: explicit failure (no fabricated content — scenes stay empty)
         updateStep(script, WorkflowStep.DIALOGUE_GENERATE);
         scriptService.updateProgress(scriptId, 65.0, WorkflowStep.DIALOGUE_GENERATE);
         scenes = generateDialoguesWithFallback(scriptId, scenes, characters);
@@ -366,7 +366,7 @@ public class GenerationOrchestrator {
         scriptService.updateProgress(scriptId, 80.0, WorkflowStep.DIALOGUE_GENERATE);
 
         // Action generation — AI only; on failure the scene is marked as pending
-        // (NO mock fabrication — scenes stay empty)
+        // (no fabricated content — scenes stay empty)
         updateStep(script, WorkflowStep.ACTION_GENERATE);
         scriptService.updateProgress(scriptId, 85.0, WorkflowStep.ACTION_GENERATE);
         scenes = generateActionsWithFallback(scriptId, scenes, characters, scenes.stream()
@@ -458,8 +458,8 @@ public class GenerationOrchestrator {
     private List<Scene> generateDialoguesWithFallback(Long scriptId, List<Scene> scenes, List<Character> characters) {
         if (characters == null || characters.isEmpty()) {
             // No fabrication: without characters we cannot attribute any dialogue.
-            // Mark every scene as pending instead of injecting mock lines.
-            log.warn("No characters available for dialogue generation — {} scenes marked as pending, no mock lines injected",
+            // Mark every scene as pending instead of injecting placeholder lines.
+            log.warn("No characters available for dialogue generation — {} scenes marked as pending, no lines fabricated",
                     scenes.size());
             for (Scene scene : scenes) {
                 scene.setDialogues(new ArrayList<>());
@@ -524,7 +524,7 @@ public class GenerationOrchestrator {
                 }
 
                 // Tier 3: no fabrication — explicitly fail, write nothing
-                // (原为 mock 编造：往剧本里塞硬编码台词。现改为显式失败，标记待补全)
+                // (历史遗留的硬编码台词兜底已移除；现改为显式失败并标记待补全)
                 synchronized (scene) {
                     scene.setDialogues(new ArrayList<>());
                 }
@@ -553,13 +553,12 @@ public class GenerationOrchestrator {
         int sceneCount = scenes.size();
         int aiCount = aiSuccessCount.get();
         int speechCount = speechFallbackCount.get();
-        int mockCount = failed;
         double aiRatio = sceneCount > 0 ? (double) aiCount / sceneCount * 100.0 : 0;
         double avgDias = sceneCount > 0 ? (double) totalDialogues.get() / sceneCount : 0;
 
         log.info("📊 Dialogue quality: {}/{} scenes AI-generated ({:.0f}%), speech-extract={}, failed(no fabrication)={}, "
                 + "totalDialogues={}, avgPerScene={:.1f} (parallelism={})",
-                aiCount, sceneCount, aiRatio, speechCount, mockCount,
+                aiCount, sceneCount, aiRatio, speechCount, failed,
                 totalDialogues.get(), avgDias, parallelism);
 
         return scenes;
@@ -683,8 +682,8 @@ public class GenerationOrchestrator {
                                                      List<Dialogue> allDialogues) {
         if (characters == null || characters.isEmpty()) {
             // No fabrication: without characters we cannot attribute any action.
-            // Mark every scene as pending instead of injecting mock actions.
-            log.warn("No characters available for action generation — {} scenes marked as pending, no mock actions injected",
+            // Mark every scene as pending instead of injecting placeholder actions.
+            log.warn("No characters available for action generation — {} scenes marked as pending, no actions fabricated",
                     scenes.size());
             for (Scene scene : scenes) {
                 scene.setActions(new ArrayList<>());
@@ -719,7 +718,7 @@ public class GenerationOrchestrator {
                 }
 
                 // No fabrication — leave empty and mark for manual completion
-                // (原为 mock 编造：硬编码动作模板。现改为显式失败)
+                // (历史遗留的硬编码动作模板兜底已移除；现改为显式失败并标记待补全)
                 synchronized (scene) {
                     scene.setActions(new ArrayList<>());
                 }

@@ -63,8 +63,8 @@ public class ExportService {
 
     /**
      * Ensure the script is ready for export (generation must have finished).
-     * {@link ScriptStatus#PARTIAL} counts as finished: gaps are left empty on
-     * purpose instead of being filled with fabricated content.
+     * {@link ScriptStatus#COMPLETED_WITH_WARNINGS} counts as finished: gaps are
+     * left empty on purpose instead of being filled with fabricated content.
      */
     public void ensureExportable(Script script) {
         if (script == null) {
@@ -72,7 +72,7 @@ public class ExportService {
         }
         if (!script.isGenerated()) {
             throw new BusinessException("SCRIPT_NOT_COMPLETED",
-                    "Script must be COMPLETED or PARTIAL before export. Current: " + script.getStatus());
+                    "Script must be COMPLETED or COMPLETED_WITH_WARNINGS before export. Current: " + script.getStatus());
         }
     }
 }

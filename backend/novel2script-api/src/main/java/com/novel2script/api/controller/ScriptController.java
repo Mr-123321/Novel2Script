@@ -4,6 +4,7 @@ import com.novel2script.api.util.SseEmitterUtils;
 import com.novel2script.application.service.NovelService;
 import com.novel2script.application.service.ScriptService;
 import com.novel2script.common.enums.Emotion;
+import com.novel2script.common.enums.ScriptStatus;
 import com.novel2script.common.enums.WorkflowStep;
 import com.novel2script.domain.dto.GenerationProgress;
 import com.novel2script.domain.dto.ScriptGenerateRequest;
@@ -191,14 +192,20 @@ public class ScriptController {
                     return;
                 }
 
-                if (progress >= 100.0) {
-                    // Report the real terminal status — PARTIAL means generation finished
-                    // but some scenes were left empty (flagged 待补全), never fabricated.
+                // Emit "complete" only once the status is genuinely terminal.
+                // The orchestrator calls updateProgress(100) and then completeScript()
+                // as two separate writes, so gating on progress alone could push a
+                // "complete" event carrying a stale GENERATING status.
+                ScriptStatus status = scriptOpt.map(Script::getStatus).orElse(null);
+                boolean finished = status == ScriptStatus.COMPLETED
+                        || status == ScriptStatus.COMPLETED_WITH_WARNINGS;
+
+                if (finished) {
+                    // Report the real terminal status — COMPLETED_WITH_WARNINGS means generation
+                    // finished but some scenes were left empty (flagged 待补全), never fabricated.
                     Map<String, Object> completePayload = new LinkedHashMap<>();
                     completePayload.put("scriptId", id);
-                    String finalStatus = scriptOpt.map(s -> s.getStatus() != null ? s.getStatus().name() : "COMPLETED")
-                            .orElse("COMPLETED");
-                    completePayload.put("status", finalStatus);
+                    completePayload.put("status", status.name());
                     scriptOpt.map(Script::getWorkflowState).ifPresent(ws -> {
                         if (ws != null) {
                             Object failedD = ws.get("failedDialogueScenes");
