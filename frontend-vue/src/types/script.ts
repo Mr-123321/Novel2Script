@@ -1,6 +1,6 @@
 import type { Character } from './character';
 
-export type ScriptStatus = 'DRAFT' | 'GENERATING' | 'COMPLETED' | 'FAILED';
+export type ScriptStatus = 'DRAFT' | 'GENERATING' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
 
 export type WorkflowStep =
   | 'CHAPTER_PARSE'

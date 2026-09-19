@@ -14,6 +14,14 @@ public enum ScriptStatus {
     /** Generation completed successfully */
     COMPLETED,
 
+    /**
+     * Generation finished, but some content could not be produced by AI
+     * (e.g. scenes whose dialogue/action generation failed).
+     * Those scenes are left empty and flagged for manual completion —
+     * nothing is fabricated to fill the gap.
+     */
+    PARTIAL,
+
     /** Generation failed with errors */
     FAILED
 }

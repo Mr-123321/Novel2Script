@@ -22,6 +22,7 @@ backend/novel2script-api/src/main/resources/.env.local
 
 # IDE / AI assistant
 .trae/
+.workbuddy/
 Demo.md
 backend/error.txt
 temp_repo/

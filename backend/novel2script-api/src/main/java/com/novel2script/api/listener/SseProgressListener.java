@@ -50,13 +50,26 @@ public class SseProgressListener {
         Script script = scriptOpt.get();
         ScriptStatus status = script.getStatus();
 
-        if (status == ScriptStatus.COMPLETED) {
-            // Send final progress snapshot, then complete event, then close all connections
+        if (status == ScriptStatus.COMPLETED || status == ScriptStatus.PARTIAL) {
+            // Send final progress snapshot, then complete event, then close all connections.
+            // PARTIAL = finished, but some scenes were left empty (待补全) instead of
+            // being padded with fabricated content.
             sendProgress(script);
-            sseRegistry.send(scriptId, "complete",
-                    Map.of("scriptId", scriptId, "status", "COMPLETED"));
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("scriptId", scriptId);
+            payload.put("status", status.name());
+            Map<String, Object> ws = script.getWorkflowState();
+            if (ws != null) {
+                if (ws.get("failedDialogueScenes") != null) {
+                    payload.put("failedDialogueScenes", ws.get("failedDialogueScenes"));
+                }
+                if (ws.get("failedActionScenes") != null) {
+                    payload.put("failedActionScenes", ws.get("failedActionScenes"));
+                }
+            }
+            sseRegistry.send(scriptId, "complete", payload);
             sseRegistry.closeAll(scriptId);
-            log.debug("SseProgressListener: script {} COMPLETED — SSE connections closed", scriptId);
+            log.debug("SseProgressListener: script {} {} — SSE connections closed", scriptId, status);
             return;
         }
 

@@ -192,9 +192,22 @@ public class ScriptController {
                 }
 
                 if (progress >= 100.0) {
-                    sseUtils.send(emitter,
-                            SseEmitter.event().name("complete"),
-                            Map.of("scriptId", id, "status", "COMPLETED"));
+                    // Report the real terminal status — PARTIAL means generation finished
+                    // but some scenes were left empty (flagged 待补全), never fabricated.
+                    Map<String, Object> completePayload = new LinkedHashMap<>();
+                    completePayload.put("scriptId", id);
+                    String finalStatus = scriptOpt.map(s -> s.getStatus() != null ? s.getStatus().name() : "COMPLETED")
+                            .orElse("COMPLETED");
+                    completePayload.put("status", finalStatus);
+                    scriptOpt.map(Script::getWorkflowState).ifPresent(ws -> {
+                        if (ws != null) {
+                            Object failedD = ws.get("failedDialogueScenes");
+                            Object failedA = ws.get("failedActionScenes");
+                            if (failedD != null) completePayload.put("failedDialogueScenes", failedD);
+                            if (failedA != null) completePayload.put("failedActionScenes", failedA);
+                        }
+                    });
+                    sseUtils.send(emitter, SseEmitter.event().name("complete"), completePayload);
                     emitter.complete();
                     cleanup.run();
                 }
@@ -249,12 +262,20 @@ public class ScriptController {
 
         log.info("Update scene: scriptId={}, sceneId={}", id, sceneId);
 
-        // Placeholder — in production this would delegate to ScriptService
+        try {
+            scriptService.updateScene(id, sceneId, updates);
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("code", 404);
+            err.put("message", e.getMessage());
+            return ResponseEntity.status(404).body(err);
+        }
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scriptId", id);
         response.put("sceneId", sceneId);
         response.put("updated", true);
-        response.put("message", "场景更新已接收（功能开发中）");
+        response.put("message", "场景已更新");
         return ResponseEntity.ok(response);
     }
 
@@ -267,12 +288,22 @@ public class ScriptController {
 
         log.info("Update dialogue: scriptId={}, dialogueId={}", id, dialogueId);
 
-        // Placeholder — in production this would delegate to ScriptService
+        Long sceneId = scriptService.findSceneIdForDialogue(id, dialogueId);
+        if (sceneId == null) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("code", 404);
+            err.put("message", "对白不存在: dialogueId=" + dialogueId);
+            return ResponseEntity.status(404).body(err);
+        }
+
+        scriptService.updateDialogue(id, sceneId, dialogueId, updates);
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scriptId", id);
+        response.put("sceneId", sceneId);
         response.put("dialogueId", dialogueId);
         response.put("updated", true);
-        response.put("message", "对话更新已接收（功能开发中）");
+        response.put("message", "对白已更新");
         return ResponseEntity.ok(response);
     }
 

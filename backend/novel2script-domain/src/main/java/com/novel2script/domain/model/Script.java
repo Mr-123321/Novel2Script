@@ -99,8 +99,13 @@ public class Script {
         this.status = ScriptStatus.FAILED;
     }
 
+    /**
+     * True when generation has finished and the script content can be consumed.
+     * PARTIAL counts as generated: the pipeline stopped cleanly, some scenes are
+     * simply left empty (待补全) instead of being padded with fabricated content.
+     */
     public boolean isGenerated() {
-        return status == ScriptStatus.COMPLETED;
+        return status == ScriptStatus.COMPLETED || status == ScriptStatus.PARTIAL;
     }
 
     public boolean isInProgress() {

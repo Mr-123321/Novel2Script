@@ -668,10 +668,11 @@ public class DialogueAgent {
             }
         }
 
-        // ── Final fallback: one placeholder dialogue per scene ──
-        if (dialogues.isEmpty() && characters != null && characters.size() >= 2) {
-            log.warn("DialogueAgent: all parsing failed for '{}' — generating placeholder dialogue", scene.getTitle());
-            dialogues = generatePlaceholderDialogues(scene, characters);
+        // ── No fabrication: if all parsing failed, return empty and let the
+        //    orchestrator mark the scene as failed/pending — never invent lines ──
+        if (dialogues.isEmpty()) {
+            log.warn("DialogueAgent: no dialogues could be parsed or extracted for '{}' "
+                    + "— returning empty (no placeholder fabrication)", scene.getTitle());
         }
 
         if (dialogues.isEmpty() && jsonArray == null && content.indexOf('{') < 0 && content.indexOf('[') < 0) {
@@ -745,27 +746,6 @@ public class DialogueAgent {
             }
         }
 
-        return dialogues;
-    }
-
-    /** Generate placeholder dialogues when all else fails — ensures pipeline doesn't break. */
-    private List<Dialogue> generatePlaceholderDialogues(Scene scene, List<Character> characters) {
-        List<Dialogue> dialogues = new ArrayList<>();
-        String[][] fallbackLines = {
-            {"CALM", "嗯。"},
-            {"CALM", "我明白了。"},
-            {"SURPRISED", "什么？"},
-            {"CALM", "走吧。"}
-        };
-        for (int i = 0; i < Math.min(2, characters.size()); i++) {
-            String[] line = fallbackLines[i % fallbackLines.length];
-            Character c = characters.get(i % characters.size());
-            dialogues.add(Dialogue.builder()
-                    .sceneId(scene.getId()).characterId(c.getId())
-                    .speaker(c.getCanonicalName()).content(line[1])
-                    .emotion(com.novel2script.common.enums.Emotion.valueOf(line[0]))
-                    .sequence(i + 1).build());
-        }
         return dialogues;
     }
 

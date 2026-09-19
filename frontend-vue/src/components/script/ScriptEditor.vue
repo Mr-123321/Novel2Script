@@ -30,8 +30,8 @@
           >✏️ 编辑</button>
         </div>
 
-        <!-- Download dropdown (only when completed) -->
-        <div v-if="script?.status === 'COMPLETED'" class="toolbar-downloads">
+        <!-- Download dropdown (when generation finished — PARTIAL still has content to export) -->
+        <div v-if="script?.status === 'COMPLETED' || script?.status === 'PARTIAL'" class="toolbar-downloads">
           <button class="download-btn" @click="downloadOpen = !downloadOpen">
             📥 下载
           </button>

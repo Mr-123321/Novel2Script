@@ -9,6 +9,18 @@
       />
     </div>
 
+    <!-- Partial generation banner (finished, but some scenes are 待补全) -->
+    <div v-if="!generationError && script?.status === 'PARTIAL'" class="partial-banner">
+      <span class="banner-icon">✎</span>
+      <div class="banner-body">
+        <p class="banner-title">生成完成，但有部分场景未能生成</p>
+        <p class="banner-detail">
+          对白缺失 {{ failedDialogueScenes }} 个场景<span v-if="failedActionScenes > 0">，动作缺失 {{ failedActionScenes }} 个场景</span>。
+          系统未编造任何台词或动作，请人工补全后再使用。
+        </p>
+      </div>
+    </div>
+
     <!-- Script failed banner (already failed on load) -->
     <div v-if="!generationError && script?.status === 'FAILED'" class="failed-banner">
       <span class="banner-icon">⚠️</span>
@@ -140,7 +152,7 @@ watch(() => store.script?.status, (status) => {
   if (status === 'GENERATING') {
     startProgressSimulation()
   }
-  if (status === 'COMPLETED' || status === 'FAILED') {
+  if (status === 'COMPLETED' || status === 'PARTIAL' || status === 'FAILED') {
     resolved.value = true
     displayProgress.value = 100
     hideProgressTimeout = setTimeout(() => {
@@ -160,6 +172,16 @@ onUnmounted(() => {
 })
 
 const script = computed(() => store.script)
+
+function readWarningCount(key: string): number {
+  const ws = script.value?.workflowState as Record<string, unknown> | undefined
+  const raw = ws?.[key]
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) ? n : 0
+}
+
+const failedDialogueScenes = computed(() => readWarningCount('failedDialogueScenes'))
+const failedActionScenes = computed(() => readWarningCount('failedActionScenes'))
 const showProgressOverlay = computed(() =>
   script.value?.status === 'GENERATING' && !generationError.value && progressVisible.value
 )
@@ -193,6 +215,25 @@ const showProgressOverlay = computed(() =>
   border-bottom: 1px solid rgba(194, 59, 34, 0.2);
   color: var(--cinnabar);
   font-size: 13px;
+}
+
+.partial-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--warm-gold-surface);
+  border-bottom: 1px solid rgba(212, 168, 83, 0.28);
+  color: var(--warm-gold-light);
+  font-size: 13px;
+}
+
+.partial-banner .banner-title {
+  color: var(--warm-gold-light);
+}
+
+.partial-banner .banner-detail {
+  color: var(--text-secondary);
 }
 
 .banner-icon {

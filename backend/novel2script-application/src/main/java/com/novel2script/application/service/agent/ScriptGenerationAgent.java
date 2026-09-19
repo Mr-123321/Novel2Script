@@ -208,9 +208,16 @@ public class ScriptGenerationAgent {
 
         String json = CharacterAgent.extractJson(responseText);
         if (json == null) {
+            // No fabrication: a plain-text response is NOT a script. Previously this
+            // fabricated a placeholder character ("AI_Response") plus a pseudo scene,
+            // which then leaked into the saved script. Return null instead so the
+            // orchestrator falls back to the real multi-step pipeline.
             log.warn("ScriptGenerationAgent: no JSON found in AI response — "
-                    + "response may be plain text. Attempting text-based fallback...");
-            return buildScriptFromText(responseText, scriptId);
+                    + "response may be plain text. Returning null (no fabrication); "
+                    + "orchestrator will fall back to the multi-step pipeline. "
+                    + "First 300 chars: {}",
+                    responseText.length() > 300 ? responseText.substring(0, 300) + "…" : responseText);
+            return null;
         }
 
         log.debug("ScriptGenerationAgent: extracted JSON block ({} chars)", json.length());
@@ -274,62 +281,6 @@ public class ScriptGenerationAgent {
                     json.length() > 500 ? json.substring(0, 500) + "..." : json);
             return null;
         }
-    }
-
-    /**
-     * Last-resort fallback: try to build a minimal script from plain-text response.
-     * The AI sometimes returns a narrative description instead of structured JSON.
-     */
-    private Script buildScriptFromText(String text, Long scriptId) {
-        if (text == null || text.isBlank()) return null;
-
-        log.warn("ScriptGenerationAgent: building minimal script from plain-text response ({} chars)", text.length());
-
-        // Create a single placeholder character to hold the raw output
-        Character placeholder = new Character();
-        placeholder.setId(scriptId * 1000);
-        placeholder.setScriptId(scriptId);
-        placeholder.setCanonicalName("AI_Response");
-        placeholder.setRoleType(CharacterRoleType.SUPPORTING);
-        placeholder.setDescription("AI 模型返回的原始文本响应（非结构化）");
-        placeholder.setPersonality(List.of());
-        placeholder.setAliases(List.of());
-        placeholder.setResolved(true);
-        placeholder.setCreatedAt(LocalDateTime.now());
-
-        // Create a single scene containing the raw text summary
-        Scene rawScene = new Scene();
-        rawScene.setId(scriptId * 1000 + 100);
-        rawScene.setScriptId(scriptId);
-        rawScene.setSceneNumber(1);
-        rawScene.setLocation("未知");
-        rawScene.setTimeOfDay(TimeOfDay.UNKNOWN);
-        rawScene.setInterior(true);
-        rawScene.setTitle("AI 原始响应");
-        rawScene.setSummary(text.length() > 200 ? text.substring(0, 200) + "…" : text);
-        rawScene.setMood("中性");
-        rawScene.setSourceReason(SourceReason.CHAPTER_BOUNDARY);
-        rawScene.setChapterIds(new ArrayList<>());
-        rawScene.setCharacterIds(List.of(placeholder.getId()));
-        rawScene.setDialogues(new ArrayList<>());
-        rawScene.setActions(new ArrayList<>());
-        rawScene.setCreatedAt(LocalDateTime.now());
-
-        Script script = new Script();
-        script.setId(scriptId);
-        script.setTitle("AI 原始响应（非结构化）");
-        script.setCharacters(List.of(placeholder));
-        script.setScenes(List.of(rawScene));
-        script.setPlotEvents(new ArrayList<>());
-        script.setCharacterCount(1);
-        script.setSceneCount(1);
-        script.setDialogueCount(0);
-        script.setVersion(1);
-
-        log.warn("ScriptGenerationAgent: returned fallback script from plain text — "
-                + "this indicates the AI model did not follow the JSON output format. "
-                + "Consider updating the prompt template or switching models.");
-        return script;
     }
 
     @SuppressWarnings("unchecked")

@@ -26,8 +26,9 @@ import java.util.stream.Collectors;
  * Orchestrates the full Novel → Script generation pipeline.
  *
  * <p>Each step calls the corresponding AI agent. If an agent fails
- * (e.g. no API key, network error, model unavailable), the pipeline
- * falls back to mock data so the user can still see the full flow.
+ * (e.g. no API key, network error, model unavailable), the pipeline either
+ * falls back to deterministic extraction from the source text (dialogue regex)
+ * or records an explicit failure — it NEVER injects fabricated content.
  */
 @Slf4j
 @Service
@@ -180,12 +181,13 @@ public class GenerationOrchestrator {
                         // ── Phase 2: Fill dialogues & actions per scene (parallel, with fallback) ──
                         scriptService.updateProgress(scriptId, 60.0, WorkflowStep.DIALOGUE_GENERATE);
                         List<Scene> filledScenes = generateDialoguesWithFallback(
-                                outlineScenes, outline.getCharacters());
+                                scriptId, outlineScenes, outline.getCharacters());
                         scriptService.updateScenes(scriptId, filledScenes);
                         scriptService.updateProgress(scriptId, 80.0, WorkflowStep.DIALOGUE_GENERATE);
 
                         scriptService.updateProgress(scriptId, 85.0, WorkflowStep.ACTION_GENERATE);
-                        filledScenes = generateActionsWithFallback(filledScenes, outline.getCharacters(),
+                        filledScenes = generateActionsWithFallback(scriptId, filledScenes,
+                                outline.getCharacters(),
                                 filledScenes.stream().flatMap(s -> s.getDialogues().stream()).toList());
                         scriptService.updateScenes(scriptId, filledScenes);
                         scriptService.updateProgress(scriptId, 95.0, WorkflowStep.ACTION_GENERATE);
@@ -246,7 +248,8 @@ public class GenerationOrchestrator {
                             && !partialScript.getScenes().isEmpty()) {
                         log.info("Partial result preserved: {} characters, {} scene outlines — will fill with fallback",
                                 partialScript.getCharacters().size(), partialScript.getScenes().size());
-                        // Fall through to runMultiStepPipeline which will fill dialogues/actions as mock
+                        // Fall through to runMultiStepPipeline which will fill dialogues/actions
+                        // with AI or source-extracted content only — never fabricated data
                     }
                 } catch (Exception ex) {
                     log.debug("Could not check partial save state: {}", ex.getMessage());
@@ -354,17 +357,19 @@ public class GenerationOrchestrator {
             scriptService.updateProgress(scriptId, 60.0, WorkflowStep.SCENE_SEGMENT);
         }
 
-        // Dialogue generation — try AI first, fallback to speech-action extraction, then mock
+        // Dialogue generation — Tier 1: AI, Tier 2: regex extraction from source,
+        // Tier 3: explicit failure (NO mock fabrication — scenes stay empty)
         updateStep(script, WorkflowStep.DIALOGUE_GENERATE);
         scriptService.updateProgress(scriptId, 65.0, WorkflowStep.DIALOGUE_GENERATE);
-        scenes = generateDialoguesWithFallback(scenes, characters);
+        scenes = generateDialoguesWithFallback(scriptId, scenes, characters);
         scriptService.updateScenes(scriptId, scenes);
         scriptService.updateProgress(scriptId, 80.0, WorkflowStep.DIALOGUE_GENERATE);
 
-        // Action generation — try AI first, fallback to mock
+        // Action generation — AI only; on failure the scene is marked as pending
+        // (NO mock fabrication — scenes stay empty)
         updateStep(script, WorkflowStep.ACTION_GENERATE);
         scriptService.updateProgress(scriptId, 85.0, WorkflowStep.ACTION_GENERATE);
-        scenes = generateActionsWithFallback(scenes, characters, scenes.stream()
+        scenes = generateActionsWithFallback(scriptId, scenes, characters, scenes.stream()
                 .flatMap(s -> s.getDialogues().stream()).toList());
         scriptService.updateScenes(scriptId, scenes);
         scriptService.updateProgress(scriptId, 95.0, WorkflowStep.ACTION_GENERATE);
@@ -402,15 +407,6 @@ public class GenerationOrchestrator {
             log.info("  {}: {} → {}", taskName, taskType.getDefaultProvider(), modelStr);
         } catch (Exception e) {
             log.warn("  {}: {} → (unavailable — will fallback)", taskName, taskType.getDefaultProvider());
-        }
-    }
-
-    /** Log whether AI or mock was used for a step result */
-    private void logStepResult(String step, boolean aiSuccess, int resultCount) {
-        if (aiSuccess) {
-            log.info("✅ Step {}: AI produced {} results", step, resultCount);
-        } else {
-            log.warn("⚠️  Step {}: using MOCK data ({} items) — AI call failed or returned empty", step, resultCount);
         }
     }
 
@@ -459,10 +455,17 @@ public class GenerationOrchestrator {
      * Scenes are processed in parallel to reduce wall-clock time
      * (was ~90s serial, now ~20s with 5-thread pool).
      */
-    private List<Scene> generateDialoguesWithFallback(List<Scene> scenes, List<Character> characters) {
+    private List<Scene> generateDialoguesWithFallback(Long scriptId, List<Scene> scenes, List<Character> characters) {
         if (characters == null || characters.isEmpty()) {
-            log.warn("No characters available for dialogue generation");
-            return buildDialoguesMock(scenes, characters);
+            // No fabrication: without characters we cannot attribute any dialogue.
+            // Mark every scene as pending instead of injecting mock lines.
+            log.warn("No characters available for dialogue generation — {} scenes marked as pending, no mock lines injected",
+                    scenes.size());
+            for (Scene scene : scenes) {
+                scene.setDialogues(new ArrayList<>());
+            }
+            recordDialogueFailure(scriptId, scenes, scenes.size());
+            return scenes;
         }
 
         // Invalidate dialogue agent's character profile cache for fresh batch
@@ -470,7 +473,7 @@ public class GenerationOrchestrator {
 
         AtomicInteger aiSuccessCount = new AtomicInteger(0);
         AtomicInteger speechFallbackCount = new AtomicInteger(0);
-        AtomicInteger mockFallbackCount = new AtomicInteger(0);
+        AtomicInteger failedScenes = new AtomicInteger(0);
         AtomicInteger totalDialogues = new AtomicInteger(0);
 
         int parallelism = Math.min(scenes.size(), 5);
@@ -520,8 +523,13 @@ public class GenerationOrchestrator {
                     return;
                 }
 
-                // Tier 3: mock
-                mockFallbackCount.incrementAndGet();
+                // Tier 3: no fabrication — explicitly fail, write nothing
+                // (原为 mock 编造：往剧本里塞硬编码台词。现改为显式失败，标记待补全)
+                synchronized (scene) {
+                    scene.setDialogues(new ArrayList<>());
+                }
+                failedScenes.incrementAndGet();
+                log.warn("对白生成失败，场景 '{}' 标记为待补全（不编造台词）", scene.getTitle());
             }, pool));
         }
 
@@ -534,32 +542,48 @@ public class GenerationOrchestrator {
             pool.shutdownNow();
         }
 
-        if (mockFallbackCount.get() > 0) {
-            // Only fill empty scenes — don't overwrite AI-generated dialogues
-            for (Scene scene : scenes) {
-                if (scene.getDialogues() == null || scene.getDialogues().isEmpty()) {
-                    List<Character> presentChars = resolveCharactersForScene(scene, characters);
-                    List<Dialogue> fill = buildMockDialoguesForScene(scene, presentChars);
-                    scene.setDialogues(fill);
-                    totalDialogues.addAndGet(fill.size());
-                }
-            }
+        int failed = failedScenes.get();
+        if (failed > 0) {
+            log.warn("⚠️  对白生成：{}/{} 个场景无对白（AI 与原文抽取均失败）——不编造台词，待人工补全",
+                    failed, scenes.size());
+            recordDialogueFailure(scriptId, scenes, failed);
         }
 
         // ── Quality metrics logging ──
         int sceneCount = scenes.size();
         int aiCount = aiSuccessCount.get();
         int speechCount = speechFallbackCount.get();
-        int mockCount = mockFallbackCount.get();
+        int mockCount = failed;
         double aiRatio = sceneCount > 0 ? (double) aiCount / sceneCount * 100.0 : 0;
         double avgDias = sceneCount > 0 ? (double) totalDialogues.get() / sceneCount : 0;
 
-        log.info("📊 Dialogue quality: {}/{} scenes AI-generated ({:.0f}%), speech-extract={}, mock={}, "
+        log.info("📊 Dialogue quality: {}/{} scenes AI-generated ({:.0f}%), speech-extract={}, failed(no fabrication)={}, "
                 + "totalDialogues={}, avgPerScene={:.1f} (parallelism={})",
                 aiCount, sceneCount, aiRatio, speechCount, mockCount,
                 totalDialogues.get(), avgDias, parallelism);
 
         return scenes;
+    }
+
+    /**
+     * Persist dialogue-generation failure info into the script's workflowState
+     * so the frontend can surface "待补全" scenes instead of silently showing
+     * fabricated dialogue as success.
+     */
+    private void recordDialogueFailure(Long scriptId, List<Scene> scenes, int failedCount) {
+        if (scriptId == null) return;
+        try {
+            List<Long> failedSceneIds = scenes.stream()
+                    .filter(s -> s.getDialogues() == null || s.getDialogues().isEmpty())
+                    .map(Scene::getId)
+                    .toList();
+            Map<String, Object> warnings = new LinkedHashMap<>();
+            warnings.put("failedDialogueScenes", failedCount);
+            warnings.put("failedDialogueSceneIds", failedSceneIds);
+            scriptService.recordGenerationWarnings(scriptId, warnings);
+        } catch (Exception e) {
+            log.debug("Could not record dialogue failure warning: {}", e.getMessage());
+        }
     }
 
     /**
@@ -653,15 +677,24 @@ public class GenerationOrchestrator {
      * Generate actions for all scenes with two-tier fallback, executed in parallel.
      * Was ~113s serial, now ~25s with 5-thread pool.
      */
-    private List<Scene> generateActionsWithFallback(List<Scene> scenes,
+    private List<Scene> generateActionsWithFallback(Long scriptId,
+                                                     List<Scene> scenes,
                                                      List<Character> characters,
                                                      List<Dialogue> allDialogues) {
         if (characters == null || characters.isEmpty()) {
-            return buildActionsMock(scenes, characters);
+            // No fabrication: without characters we cannot attribute any action.
+            // Mark every scene as pending instead of injecting mock actions.
+            log.warn("No characters available for action generation — {} scenes marked as pending, no mock actions injected",
+                    scenes.size());
+            for (Scene scene : scenes) {
+                scene.setActions(new ArrayList<>());
+            }
+            recordActionFailure(scriptId, scenes, scenes.size());
+            return scenes;
         }
 
         AtomicInteger aiSuccessCount = new AtomicInteger(0);
-        AtomicInteger mockFallbackCount = new AtomicInteger(0);
+        AtomicInteger failedScenes = new AtomicInteger(0);
 
         int parallelism = Math.min(scenes.size(), 5);
         ExecutorService pool = Executors.newFixedThreadPool(parallelism);
@@ -685,7 +718,13 @@ public class GenerationOrchestrator {
                     log.debug("AI action failed for '{}': {}", scene.getTitle(), e.getMessage());
                 }
 
-                mockFallbackCount.incrementAndGet();
+                // No fabrication — leave empty and mark for manual completion
+                // (原为 mock 编造：硬编码动作模板。现改为显式失败)
+                synchronized (scene) {
+                    scene.setActions(new ArrayList<>());
+                }
+                failedScenes.incrementAndGet();
+                log.warn("动作生成失败，场景 '{}' 标记为待补全（不编造动作）", scene.getTitle());
             }, pool));
         }
 
@@ -698,464 +737,37 @@ public class GenerationOrchestrator {
             pool.shutdownNow();
         }
 
-        if (mockFallbackCount.get() > 0) {
-            // Only fill empty scenes — don't overwrite AI-generated actions
-            for (Scene scene : scenes) {
-                if (scene.getActions() == null || scene.getActions().isEmpty()) {
-                    List<Character> presentChars = resolveCharactersForScene(scene, characters);
-                    scene.setActions(buildMockActionsForScene(scene, presentChars));
-                }
-            }
+        int failed = failedScenes.get();
+        if (failed > 0) {
+            log.warn("⚠️  动作生成：{}/{} 个场景无动作（AI 生成失败）——不编造动作，待人工补全",
+                    failed, scenes.size());
+            recordActionFailure(scriptId, scenes, failed);
         }
 
-        log.info("Action generation: AI={}, mock={} (parallelism={})",
-                aiSuccessCount.get(), mockFallbackCount.get(), parallelism);
+        log.info("Action generation: AI={}, failed(no fabrication)={} (parallelism={})",
+                aiSuccessCount.get(), failed, parallelism);
         return scenes;
     }
 
-    // ═══════════════ Mock fallback builders ═══════════════
-    // Used when AI agents are unavailable (no API key, network error, etc.)
-
-    private List<Character> buildCharactersMock(Long scriptId, Novel novel) {
-        log.info("Using mock character data for scriptId={}", scriptId);
-        List<Character> chars = new ArrayList<>();
-        String title = novel.getTitle();
-        int seed = Math.abs(title.hashCode());
-
-        String[][] templates = {
-            {"林川", "PROTAGONIST", "MALE", "25-30", "冷静睿智的主角，身怀秘密",
-             "冷静,果断,善良", "25"},
-            {"李雪", "SUPPORTING", "FEMALE", "23-28", "机智勇敢的女医生",
-             "机智,勇敢,善良", "18"},
-            {"王建国", "ANTAGONIST", "MALE", "45-55", "神秘组织的首领，城府极深",
-             "冷酷,野心,狡猾", "20"},
-            {"陈峰", "SUPPORTING", "MALE", "28-35", "退役特种兵，性格豪爽",
-             "豪爽,忠诚,热血", "15"},
-            {"苏雨晴", "SUPPORTING", "FEMALE", "20-25", "活泼开朗的大学生",
-             "活泼,善良,聪明", "12"},
-            {"老太太张", "MINOR", "FEMALE", "65-75", "慈祥的邻居老人",
-             "慈祥,热心,传统", "5"},
-            {"黑衣人首领", "ANTAGONIST", "MALE", "35-45", "神秘黑衣组织核心成员",
-             "冷酷,沉默,高效", "8"},
-            {"赵教授", "SUPPORTING", "MALE", "50-60", "考古学教授，博学多识",
-             "博学,固执,正直", "10"},
-        };
-
-        String[][] relationships = {
-            {"李雪", "青梅竹马"}, {"王建国", "宿敌"}, {"苏雨晴", "妹妹"},
-            {"林川", "搭档"}, {"陈峰", "战友"}, {"林川", "救命恩人"},
-            {"林川", "导师"}, {"王建国", "部下"},
-        };
-
-        AtomicInteger idSeq = new AtomicInteger((int)(scriptId * 1000));
-        int charCount = Math.min(5 + (seed % 3), templates.length);
-
-        for (int i = 0; i < charCount; i++) {
-            String[] t = templates[(i + seed) % templates.length];
-            Character c = new Character();
-            c.setId((long) idSeq.getAndIncrement());
-            c.setScriptId(scriptId);
-            c.setCanonicalName(t[0]);
-            c.setRoleType(CharacterRoleType.valueOf(t[1]));
-            c.setGender(t[2]);
-            c.setAgeRange(t[3]);
-            c.setDescription(t[4]);
-            c.setPersonality(Arrays.asList(t[5].split(",")));
-            c.setAppearanceCount(Integer.parseInt(t[6]));
-            c.setAliases(new ArrayList<>());
-            c.setResolved(true);
-            c.setCreatedAt(LocalDateTime.now());
-
-            List<Character.Relationship> rels = new ArrayList<>();
-            int ri = (i + seed) % relationships.length;
-            Character.Relationship r = new Character.Relationship();
-            r.setTarget(relationships[ri][0]);
-            r.setRelation(relationships[ri][1]);
-            rels.add(r);
-            if (i > 0 && i % 2 == 0) {
-                Character.Relationship r2 = new Character.Relationship();
-                r2.setTarget(templates[(i + 1) % charCount][0]);
-                r2.setRelation("故人");
-                rels.add(r2);
-            }
-            c.setRelationships(rels);
-            chars.add(c);
-        }
-        return chars;
-    }
-
-    private List<PlotEvent> buildPlotEventsMock(Long scriptId, List<Character> characters) {
-        log.info("Using content-aware plot events for scriptId={}", scriptId);
-        List<PlotEvent> events = new ArrayList<>();
-        AtomicInteger idSeq = new AtomicInteger((int)(scriptId * 1000 + 500));
-
-        // Generate events from chapter structure — each chapter = 1 event
-        // This is far more relevant than hardcoded generic event names
-        List<Chapter> chapters = null;
+    /**
+     * Persist action-generation failure info into the script's workflowState
+     * so the frontend can surface "待补全" scenes instead of silently showing
+     * fabricated actions as success.
+     */
+    private void recordActionFailure(Long scriptId, List<Scene> scenes, int failedCount) {
+        if (scriptId == null) return;
         try {
-            Novel novel = novelService.findById(scriptId).orElse(null);
-            if (novel != null) chapters = novel.getChapters();
-        } catch (Exception ignored) {}
-
-        if (chapters != null && !chapters.isEmpty()) {
-            for (int i = 0; i < chapters.size(); i++) {
-                Chapter ch = chapters.get(i);
-                String content = ch.getContent();
-                if (content == null || content.isBlank()) continue;
-
-                PlotEvent e = new PlotEvent();
-                e.setId((long) idSeq.getAndIncrement());
-                e.setScriptId(scriptId);
-                e.setEventOrder(i + 1);
-
-                // Use chapter title or first line as event title
-                String eventTitle = ch.getTitle();
-                if (eventTitle == null || eventTitle.isBlank()) {
-                    eventTitle = content.length() > 20 ? content.substring(0, 20) + "…" : content;
-                }
-                e.setTitle(eventTitle);
-
-                // Description from content
-                String desc = content.length() > 100 ? content.substring(0, 100) + "…" : content;
-                e.setDescription(desc);
-
-                e.setLocation(extractLocationFromText(content));
-                e.setImportance(3);
-                e.setChapterIds(List.of((long) ch.getChapterNumber()));
-                e.setCharacterIds(characters.stream().limit(3).map(Character::getId).toList());
-                events.add(e);
-            }
+            List<Long> failedSceneIds = scenes.stream()
+                    .filter(s -> s.getActions() == null || s.getActions().isEmpty())
+                    .map(Scene::getId)
+                    .toList();
+            Map<String, Object> warnings = new LinkedHashMap<>();
+            warnings.put("failedActionScenes", failedCount);
+            warnings.put("failedActionSceneIds", failedSceneIds);
+            scriptService.recordGenerationWarnings(scriptId, warnings);
+        } catch (Exception e) {
+            log.debug("Could not record action failure warning: {}", e.getMessage());
         }
-
-        if (events.isEmpty()) {
-            // Absolute minimal fallback
-            PlotEvent e = new PlotEvent();
-            e.setId((long) idSeq.getAndIncrement());
-            e.setScriptId(scriptId);
-            e.setEventOrder(1);
-            e.setTitle("故事开始");
-            e.setDescription("故事的开端");
-            e.setLocation("未知");
-            e.setImportance(3);
-            e.setChapterIds(List.of(1L));
-            e.setCharacterIds(characters.stream().limit(2).map(Character::getId).toList());
-            events.add(e);
-        }
-        return events;
     }
 
-    private List<Scene> buildScenesMock(Long scriptId, List<Character> characters, Novel novel) {
-        log.info("Using content-aware scene fallback for scriptId={}", scriptId);
-        List<Scene> scenes = new ArrayList<>();
-        List<Chapter> chapters = novel.getChapters();
-        AtomicInteger idSeq = new AtomicInteger((int)(scriptId * 1000 + 100));
-        int sceneNum = 0;
-
-        if (chapters != null && !chapters.isEmpty()) {
-            for (Chapter ch : chapters) {
-                if (ch.getContent() == null || ch.getContent().isBlank()) continue;
-
-                String content = ch.getContent();
-                // Split chapter into segments by double-newline (natural paragraph breaks)
-                String[] segments = content.split("\\n\\s*\\n");
-                // Take up to 3 scenes per chapter
-                int segmentsPerChapter = Math.min(segments.length, 3);
-
-                for (int i = 0; i < segmentsPerChapter; i++) {
-                    String segment = segments[i].trim();
-                    if (segment.length() < 20) continue; // skip very short segments
-
-                    sceneNum++;
-                    Scene scene = new Scene();
-                    scene.setId((long) idSeq.getAndIncrement());
-                    scene.setScriptId(scriptId);
-                    scene.setSceneNumber(sceneNum);
-                    scene.setSourceReason(i == 0 ? SourceReason.CHAPTER_BOUNDARY : SourceReason.LOCATION);
-
-                    // Extract location from segment text
-                    String location = extractLocationFromText(segment);
-                    scene.setLocation(location);
-
-                    // Infer time of day
-                    TimeOfDay tod = TimeOfDay.inferFromContent(segment);
-                    scene.setTimeOfDay(tod != TimeOfDay.UNKNOWN ? tod : TimeOfDay.MORNING);
-
-                    // Infer interior/exterior
-                    scene.setInterior(inferInteriorFromText(location, segment));
-
-                    // Title from first line or first 15 chars
-                    String title = extractTitleFromText(segment, ch.getTitle());
-                    scene.setTitle(title);
-
-                    // Summary from first 80 chars
-                    String summary = segment.length() > 80 ? segment.substring(0, 80) + "…" : segment;
-                    scene.setSummary(summary);
-
-                    // Mood from keywords
-                    scene.setMood(inferMoodFromText(segment));
-
-                    // Find which characters appear in this segment
-                    List<Long> presentCharIds = new ArrayList<>();
-                    for (Character c : characters) {
-                        if (c.getCanonicalName() != null && segment.contains(c.getCanonicalName())) {
-                            presentCharIds.add(c.getId());
-                        }
-                    }
-                    if (presentCharIds.isEmpty() && !characters.isEmpty()) {
-                        // At least include first 2 characters
-                        presentCharIds.add(characters.get(0).getId());
-                        if (characters.size() > 1) presentCharIds.add(characters.get(1).getId());
-                    }
-                    scene.setCharacterIds(presentCharIds);
-
-                    scene.setChapterIds(List.of((long) ch.getChapterNumber()));
-                    scene.setDialogues(new ArrayList<>());
-                    scene.setActions(new ArrayList<>());
-                    scene.setCreatedAt(LocalDateTime.now());
-                    scenes.add(scene);
-                }
-            }
-        }
-
-        // If no content-based scenes could be generated, create minimal scenes
-        if (scenes.isEmpty()) {
-            log.warn("No content-based scenes generated — creating minimal placeholder scenes");
-            int n = Math.min(characters.size(), 5);
-            for (int i = 0; i < n; i++) {
-                sceneNum++;
-                Scene scene = new Scene();
-                scene.setId((long) idSeq.getAndIncrement());
-                scene.setScriptId(scriptId);
-                scene.setSceneNumber(sceneNum);
-                scene.setLocation("未知地点");
-                scene.setTimeOfDay(i % 2 == 0 ? TimeOfDay.MORNING : TimeOfDay.AFTERNOON);
-                scene.setInterior(true);
-                scene.setTitle("场景 " + sceneNum);
-                scene.setSummary("第" + sceneNum + "个场景");
-                scene.setMood("中性");
-                scene.setCharacterIds(List.of(characters.get(i % characters.size()).getId()));
-                scene.setChapterIds(List.of(1L));
-                scene.setSourceReason(SourceReason.CHAPTER_BOUNDARY);
-                scene.setDialogues(new ArrayList<>());
-                scene.setActions(new ArrayList<>());
-                scene.setCreatedAt(LocalDateTime.now());
-                scenes.add(scene);
-            }
-        }
-
-        log.info("Content-aware fallback: generated {} scenes from {} chapters", scenes.size(),
-                chapters != null ? chapters.size() : 0);
-        return scenes;
-    }
-
-    /** Extract location from text by looking for place-indicating patterns */
-    private String extractLocationFromText(String text) {
-        // Look for location patterns like "在XX", "来到XX", "走进XX"
-        java.util.regex.Pattern locPtn = java.util.regex.Pattern.compile(
-                "(?:在|来到|走进|进入|回到|前往|穿过)([^，。；,!]{2,8})(?:，|。|；|,|\\s|$)");
-        java.util.regex.Matcher m = locPtn.matcher(text);
-        if (m.find()) {
-            String loc = m.group(1).trim();
-            if (!loc.isEmpty() && loc.length() <= 15) return loc;
-        }
-        return "未知地点";
-    }
-
-    /** Extract a scene title from text segment */
-    private String extractTitleFromText(String text, String chapterTitle) {
-        if (text.length() <= 15) return text;
-        // Use first sentence or first 15 chars
-        int end = text.indexOf('。');
-        if (end == -1) end = text.indexOf('，');
-        if (end == -1) end = Math.min(15, text.length());
-        String title = text.substring(0, end).trim();
-        if (title.length() > 12) title = title.substring(0, 12) + "…";
-        return title;
-    }
-
-    /** Infer interior/exterior from location name and content */
-    private boolean inferInteriorFromText(String location, String text) {
-        String combined = (location + " " + text).toLowerCase();
-        String[] indoorKw = {"室", "房", "屋", "厅", "堂", "店", "馆", "院", "宫内", "殿", "楼内", "房间", "卧室", "客厅", "厨房", "教室", "办公室"};
-        String[] outdoorKw = {"街", "路", "场", "外", "野", "山", "海", "林", "园", "广场", "操场", "公园", "森林", "河边", "湖边", "海岸"};
-        int indoor = 0, outdoor = 0;
-        for (String kw : indoorKw) if (combined.contains(kw)) indoor++;
-        for (String kw : outdoorKw) if (combined.contains(kw)) outdoor++;
-        return indoor >= outdoor;
-    }
-
-    /** Infer mood from text keywords */
-    private String inferMoodFromText(String text) {
-        if (text.contains("惊") || text.contains("怕") || text.contains("恐")) return "紧张";
-        if (text.contains("笑") || text.contains("温暖") || text.contains("开心")) return "温馨";
-        if (text.contains("怒") || text.contains("恨") || text.contains("杀")) return "愤怒";
-        if (text.contains("哭") || text.contains("泪") || text.contains("悲伤")) return "悲伤";
-        if (text.contains("神秘") || text.contains("秘密") || text.contains("黑影")) return "悬疑";
-        return "中性";
-    }
-
-    /** Generate mock dialogues for a SINGLE scene (does not overwrite other scenes). */
-    private List<Dialogue> buildMockDialoguesForScene(Scene scene, List<Character> characters) {
-        String[][] emotionLines = {
-            {"CALM", "嗯，我知道了。"},
-            {"SURPRISED", "什么？这是真的吗？"},
-            {"ANXIOUS", "我们必须尽快行动。"},
-            {"CALM", "说说你的想法。"},
-            {"COLD", "你以为这就能阻止我吗？"},
-            {"ANGRY", "你根本不明白这意味着什么！"},
-            {"FEARFUL", "我……我不知道该怎么办。"},
-            {"PROUD", "我绝不会放弃的。"},
-            {"CALM", "那就这样决定了。"},
-            {"GENTLE", "一切都会好起来的。"},
-        };
-        List<Dialogue> dialogues = new ArrayList<>();
-        if (characters == null || characters.isEmpty()) return dialogues;
-        List<String> names = characters.stream()
-                .map(com.novel2script.domain.model.Character::getCanonicalName)
-                .filter(n -> n != null && !n.isBlank()).toList();
-        if (names.isEmpty()) return dialogues;
-        int count = 2;
-        for (int j = 0; j < count; j++) {
-            String speaker = names.get(j % names.size());
-            Dialogue d = new Dialogue();
-            d.setSceneId(scene.getId());
-            d.setSequence(j + 1);
-            d.setSpeaker(speaker);
-            d.setEmotion(com.novel2script.common.enums.Emotion.valueOf(emotionLines[j][0]));
-            d.setContent(emotionLines[j][1]);
-            d.setCreatedAt(java.time.LocalDateTime.now());
-            d.setCharacterId(characters.get(j % characters.size()).getId());
-            dialogues.add(d);
-        }
-        return dialogues;
-    }
-
-    /** Generate mock actions for a SINGLE scene (does not overwrite other scenes). */
-    private List<com.novel2script.domain.model.Action> buildMockActionsForScene(Scene scene, List<Character> characters) {
-        String[][] templates = {
-            {"ACTION", "缓缓推开门，警惕地环顾四周"},
-            {"REACTION", "惊讶地后退了一步"},
-            {"BEAT", "沉默片刻，深吸一口气"},
-            {"ACTION", "转身走向门口"},
-        };
-        List<com.novel2script.domain.model.Action> actions = new ArrayList<>();
-        int count = 2;
-        for (int j = 0; j < count; j++) {
-            String[] at = templates[j % templates.length];
-            com.novel2script.domain.model.Action a = new com.novel2script.domain.model.Action();
-            a.setSceneId(scene.getId());
-            a.setSequence(j + 1);
-            a.setActionType(at[0]);
-            a.setDescription(at[1]);
-            a.setDurationMs(1500);
-            a.setCreatedAt(java.time.LocalDateTime.now());
-            if (characters != null && !characters.isEmpty()) {
-                a.setCharacterId(characters.get(j % characters.size()).getId());
-            }
-            actions.add(a);
-        }
-        return actions;
-    }
-
-    private List<Scene> buildDialoguesMock(List<Scene> scenes, List<Character> characters) {
-        // Use actual character names from the resolved character list
-        // so speaker names always match even in mock fallback mode
-        String[][] emotionLines = {
-            {"CALM", "嗯，我知道了。"},
-            {"SURPRISED", "什么？这是真的吗？"},
-            {"ANXIOUS", "我们必须尽快行动。"},
-            {"CALM", "说说你的想法。"},
-            {"COLD", "你以为这就能阻止我吗？"},
-            {"ANGRY", "你根本不明白这意味着什么！"},
-            {"FEARFUL", "我……我不知道该怎么办。"},
-            {"PROUD", "我绝不会放弃的。"},
-            {"CALM", "那就这样决定了。"},
-            {"GENTLE", "一切都会好起来的。"},
-        };
-
-        if (characters == null || characters.isEmpty()) {
-            log.warn("No characters available for mock dialogues");
-            return scenes;
-        }
-
-        // Build a rotating speaker list from actual characters
-        List<String> speakerNames = characters.stream()
-                .map(Character::getCanonicalName)
-                .filter(n -> n != null && !n.isBlank())
-                .toList();
-        if (speakerNames.isEmpty()) return scenes;
-
-        AtomicInteger dId = new AtomicInteger(1);
-        for (int si = 0; si < scenes.size(); si++) {
-            Scene scene = scenes.get(si);
-            List<Dialogue> dialogues = new ArrayList<>();
-            int count = 2 + (si % 2);
-            for (int j = 0; j < count; j++) {
-                int lineIdx = (si * 3 + j) % emotionLines.length;
-                int speakerIdx = (si + j) % speakerNames.size();
-                String speaker = speakerNames.get(speakerIdx);
-
-                Dialogue d = new Dialogue();
-                d.setId((long) dId.getAndIncrement());
-                d.setSceneId(scene.getId());
-                d.setSequence(j + 1);
-                d.setSpeaker(speaker);
-                d.setEmotion(Emotion.valueOf(emotionLines[lineIdx][0]));
-                d.setContent(emotionLines[lineIdx][1]);
-                d.setCreatedAt(LocalDateTime.now());
-
-                // Map speaker name to character ID
-                for (Character c : characters) {
-                    if (speaker.equals(c.getCanonicalName())) {
-                        d.setCharacterId(c.getId());
-                        break;
-                    }
-                }
-                dialogues.add(d);
-            }
-            scene.setDialogues(dialogues);
-        }
-        return scenes;
-    }
-
-    private List<Scene> buildActionsMock(List<Scene> scenes, List<Character> characters) {
-        String[][] templates = {
-            {"ACTION", "缓缓推开门，警惕地环顾四周"},
-            {"REACTION", "惊讶地后退了一步"},
-            {"ACTION", "快步走向窗户，向外张望"},
-            {"BEAT", "沉默片刻，深吸一口气"},
-            {"BUSINESS", "从口袋里掏出手机查看"},
-            {"ACTION", "用力拍桌而起"},
-            {"REACTION", "眼神中闪过一道光芒"},
-            {"BUSINESS", "取出手帕擦拭额头的汗水"},
-            {"ACTION", "缓缓举起手示意"},
-            {"REACTION", "身子微微一颤"},
-            {"BEAT", "两人相视无言"},
-            {"ACTION", "转身走向门口"},
-        };
-
-        AtomicInteger aId = new AtomicInteger(10000);
-        for (int si = 0; si < scenes.size(); si++) {
-            Scene scene = scenes.get(si);
-            List<Action> actions = new ArrayList<>();
-            int count = 1 + (si % 2);
-            for (int j = 0; j < count; j++) {
-                String[] at = templates[(si * 2 + j) % templates.length];
-                Action a = new Action();
-                a.setId((long) aId.getAndIncrement());
-                a.setSceneId(scene.getId());
-                a.setSequence(j + 1);
-                a.setActionType(at[0]);
-                a.setDescription(at[1]);
-                a.setDurationMs(1500 + (int)(Math.random() * 2000));
-                a.setCreatedAt(LocalDateTime.now());
-                if (!scene.getCharacterIds().isEmpty() && Math.random() > 0.3) {
-                    a.setCharacterId(scene.getCharacterIds().get(0));
-                }
-                actions.add(a);
-            }
-            scene.setActions(actions);
-        }
-        return scenes;
-    }
 }

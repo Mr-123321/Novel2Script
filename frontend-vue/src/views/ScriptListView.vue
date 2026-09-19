@@ -96,6 +96,7 @@ const deletingScript = ref<Script | null>(null)
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     COMPLETED: '已完成', GENERATING: '生成中', DRAFT: '草稿', FAILED: '失败',
+    PARTIAL: '部分完成（待补全）',
   }
   return labels[status] ?? status
 }
@@ -260,6 +261,7 @@ onMounted(fetchScripts)
 .status-generating { background: var(--warm-gold-surface); color: var(--warm-gold); }
 .status-draft { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
 .status-failed { background: var(--cinnabar-surface); color: var(--cinnabar); }
+.status-partial { background: var(--warm-gold-surface); color: var(--warm-gold-light); }
 
 .script-card-stats {
   display: flex;

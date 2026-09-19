@@ -14,7 +14,7 @@
 >
 > 
 
-📐 **设计理念**：[Novel2Script YAML Schema 设计理由](./Novel2Script%20YAML%20Schema%20设计理由.md) — 了解 YAML Schema 的可扩展性、可逆解析、影视剧本规范等核心设计原则
+📐 **设计理念**：[Novel2Script YAML Schema 设计理由](./docs/yaml-schema/schema-design-rationale.md) — 了解 YAML Schema 的可扩展性、可逆解析、影视剧本规范等核心设计原则
 
 ---
 

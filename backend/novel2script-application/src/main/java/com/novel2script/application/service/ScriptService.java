@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.novel2script.common.enums.CharacterRoleType;
 import com.novel2script.common.enums.Emotion;
 import com.novel2script.common.enums.ScriptStatus;
+import com.novel2script.common.enums.TimeOfDay;
 import com.novel2script.common.enums.WorkflowStep;
 import com.novel2script.common.exception.BusinessException;
 import com.novel2script.domain.model.*;
@@ -200,6 +201,24 @@ public class ScriptService {
         scriptMapper.updateById(script);
     }
 
+    /**
+     * Merge per-step generation warnings into the script's workflowState.
+     * Used to surface explicit failures (e.g. scenes whose dialogue could not
+     * be generated) so the frontend can show "待补全" instead of fabricated data.
+     */
+    @Transactional
+    public void recordGenerationWarnings(Long scriptId, Map<String, Object> warnings) {
+        if (scriptId == null || warnings == null || warnings.isEmpty()) return;
+        Script script = scriptMapper.selectById(scriptId);
+        if (script == null) return;
+        if (script.getWorkflowState() == null) {
+            script.setWorkflowState(new LinkedHashMap<>());
+        }
+        script.getWorkflowState().putAll(warnings);
+        script.setUpdatedAt(LocalDateTime.now());
+        scriptMapper.updateById(script);
+    }
+
     @Transactional
     public void updateCharacters(Long scriptId, List<Character> characters) {
         Script script = scriptMapper.selectById(scriptId);
@@ -323,19 +342,50 @@ public class ScriptService {
         }
     }
 
+    /**
+     * Mark generation as finished. The final status is derived from the
+     * recorded generation warnings:
+     * <ul>
+     *   <li>no failures → {@link ScriptStatus#COMPLETED}</li>
+     *   <li>some scenes failed dialogue/action generation →
+     *       {@link ScriptStatus#PARTIAL} (content is kept, gaps are flagged
+     *       as 待补全 — never filled with fabricated data)</li>
+     * </ul>
+     */
     @Transactional
     public void completeScript(Long scriptId) {
         Script script = scriptMapper.selectById(scriptId);
         if (script == null) return;
         script.setProgress(100.0);
-        script.setStatus(ScriptStatus.COMPLETED);
+        script.setStatus(hasGenerationGaps(script) ? ScriptStatus.PARTIAL : ScriptStatus.COMPLETED);
         // Generate final YAML
         Script fullScript = findById(scriptId).orElse(script);
         script.setYamlContent(generateYaml(fullScript));
         script.setUpdatedAt(LocalDateTime.now());
         scriptMapper.updateById(script);
-        log.info("Script completed: id={}, title='{}', scenes={}, characters={}",
-                scriptId, script.getTitle(), script.getSceneCount(), script.getCharacterCount());
+        log.info("Script finished: id={}, status={}, title='{}', scenes={}, characters={}",
+                scriptId, script.getStatus(), script.getTitle(),
+                script.getSceneCount(), script.getCharacterCount());
+    }
+
+    /** True when workflowState records scenes whose dialogue/action generation failed. */
+    private boolean hasGenerationGaps(Script script) {
+        Map<String, Object> ws = script.getWorkflowState();
+        if (ws == null) return false;
+        return readPositive(ws.get("failedDialogueScenes")) > 0
+                || readPositive(ws.get("failedActionScenes")) > 0;
+    }
+
+    private int readPositive(Object value) {
+        if (value instanceof Number n) return Math.max(0, n.intValue());
+        if (value instanceof String s) {
+            try {
+                return Math.max(0, Integer.parseInt(s.trim()));
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     @Transactional
@@ -531,6 +581,59 @@ public class ScriptService {
             scriptMapper.updateById(script);
         }
         log.info("Scene content reordered: scriptId={}, sceneId={}, items={}", scriptId, sceneId, items.size());
+    }
+
+    /**
+     * Partial update of a scene's descriptive fields. Only the keys present in
+     * {@code updates} are applied — dialogues/actions are untouched.
+     *
+     * @throws IllegalArgumentException when the scene does not exist or does not
+     *                                  belong to the given script
+     */
+    @Transactional
+    public void updateScene(Long scriptId, Long sceneId, Map<String, Object> updates) {
+        Scene scene = sceneMapper.selectById(sceneId);
+        if (scene == null || !scriptId.equals(scene.getScriptId())) {
+            throw new IllegalArgumentException("场景不存在: sceneId=" + sceneId);
+        }
+
+        if (updates.containsKey("title")) scene.setTitle((String) updates.get("title"));
+        if (updates.containsKey("summary")) scene.setSummary((String) updates.get("summary"));
+        if (updates.containsKey("location")) scene.setLocation((String) updates.get("location"));
+        if (updates.containsKey("mood")) scene.setMood((String) updates.get("mood"));
+        if (updates.containsKey("sceneNumber") && updates.get("sceneNumber") instanceof Number n) {
+            scene.setSceneNumber(n.intValue());
+        }
+        if (updates.containsKey("timeOfDay") && updates.get("timeOfDay") instanceof String todStr) {
+            TimeOfDay tod = TimeOfDay.fromLabel(todStr);
+            if (tod != null) scene.setTimeOfDay(tod);
+        }
+        if (updates.containsKey("interior") && updates.get("interior") instanceof Boolean interior) {
+            scene.setInterior(interior);
+        }
+
+        sceneMapper.updateById(scene);
+
+        Script script = scriptMapper.selectById(scriptId);
+        if (script != null) {
+            script.setUpdatedAt(LocalDateTime.now());
+            scriptMapper.updateById(script);
+        }
+        log.info("Scene updated: scriptId={}, sceneId={}, fields={}", scriptId, sceneId, updates.keySet());
+    }
+
+    /**
+     * Resolve which scene a dialogue belongs to, validating it against the script.
+     *
+     * @return the owning scene id, or {@code null} when the dialogue does not
+     *         exist or does not belong to the given script
+     */
+    public Long findSceneIdForDialogue(Long scriptId, Long dialogueId) {
+        Dialogue dialogue = dialogueMapper.selectById(dialogueId);
+        if (dialogue == null || dialogue.getSceneId() == null) return null;
+        Scene scene = sceneMapper.selectById(dialogue.getSceneId());
+        if (scene == null || !scriptId.equals(scene.getScriptId())) return null;
+        return scene.getId();
     }
 
     @Transactional
