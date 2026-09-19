@@ -37,6 +37,11 @@
     <div v-else class="action-view">
       <span class="action-type-tag">{{ actionTypeLabel(action.actionType) }}</span>
       <span class="action-desc">{{ action.description }}</span>
+      <span
+        v-if="action.source && action.source !== 'AI'"
+        class="source-badge"
+        :title="SOURCE_TITLES[action.source]"
+      >{{ SOURCE_LABELS[action.source] }}</span>
       <span v-if="action.durationMs" class="action-duration">
         ~{{ (action.durationMs / 1000).toFixed(1) }}s
       </span>
@@ -49,6 +54,21 @@ import { ref, computed, watch, useTemplateRef, onMounted, getCurrentInstance } f
 import { useScriptStore } from '@/stores/script'
 import { toast } from '@/stores/toast'
 import type { Action } from '@/types/script'
+
+/**
+ * Provenance badges. AI output is the norm and stays unlabelled; anything that
+ * did not come straight from the model is marked so it can be reviewed.
+ */
+const SOURCE_LABELS: Record<NonNullable<Action['source']>, string> = {
+  AI: 'AI',
+  REGEX: '正则抽取',
+  MANUAL: '人工补全',
+}
+const SOURCE_TITLES: Record<NonNullable<Action['source']>, string> = {
+  AI: 'AI 生成',
+  REGEX: '从原文正则抽取（非 AI 生成，实验统计时应剔除）',
+  MANUAL: '人工补全 / 编辑',
+}
 
 const props = defineProps<{
   action: Action
@@ -113,6 +133,9 @@ function handleSave() {
           ...a,
           description: trimmed,
           durationMs: localDurationMs.value ? parseInt(localDurationMs.value, 10) || undefined : undefined,
+          // The backend re-stamps this row as MANUAL — mirror it locally so the
+          // provenance badge appears without waiting for a refetch
+          source: 'MANUAL' as const,
         }
       : a
   )
@@ -186,6 +209,16 @@ watch(() => isEditing.value, (val) => {
   gap: 8px;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warm-gold-surface);
+  color: var(--warm-gold-light);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .action-type-tag {

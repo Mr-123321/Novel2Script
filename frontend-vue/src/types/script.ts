@@ -44,6 +44,12 @@ export interface Script {
   updatedAt: string;
 }
 
+/** How a piece of content was produced: AI / REGEX / MANUAL. */
+export type ContentSource = 'AI' | 'REGEX' | 'MANUAL';
+
+/** Per-scene generation outcome for one content type (dialogue / action). */
+export type GenerationStatus = 'COMPLETED' | 'FAILED';
+
 export interface Scene {
   id: number;
   scriptId: number;
@@ -58,6 +64,9 @@ export interface Scene {
   sceneHeading?: string; // generated: "INT. 教室 - MORNING"
   chapterIds?: number[];
   characterIds?: number[];
+  /** FAILED = generation failed; scene left empty for manual completion */
+  dialogueStatus?: GenerationStatus;
+  actionStatus?: GenerationStatus;
   dialogues: Dialogue[];
   actions: Action[];
 }
@@ -70,6 +79,8 @@ export interface Dialogue {
   speaker: string;
   emotion?: string;
   content: string;
+  /** AI = model output, REGEX = extracted from source text, MANUAL = human edit */
+  source?: ContentSource;
   parenthetical?: string;
   replyTo?: number;
 }
@@ -81,6 +92,8 @@ export interface Action {
   sequence: number;
   actionType: string;
   description: string;
+  /** AI = model output, REGEX = extracted from source text, MANUAL = human edit */
+  source?: ContentSource;
   durationMs?: number;
 }
 

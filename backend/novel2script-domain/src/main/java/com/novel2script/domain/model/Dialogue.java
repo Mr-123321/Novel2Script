@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.novel2script.common.enums.ContentSource;
 import com.novel2script.common.enums.Emotion;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,6 +36,16 @@ public class Dialogue {
     private String speaker;
     private Emotion emotion;
     private String content;
+
+    /**
+     * How this line was produced: AI / REGEX / MANUAL.
+     *
+     * <p>The DB column defaults to {@link ContentSource#AI}; the orchestrator
+     * explicitly marks regex-extracted lines, and manual edits are marked by
+     * {@code ScriptService}. Never null for persisted rows.
+     */
+    @TableField("source")
+    private ContentSource source;
 
     /** e.g., (低声), (冷笑) */
     private String parenthetical;

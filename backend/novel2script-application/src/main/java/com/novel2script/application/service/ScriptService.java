@@ -2,7 +2,9 @@ package com.novel2script.application.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.novel2script.common.enums.CharacterRoleType;
+import com.novel2script.common.enums.ContentSource;
 import com.novel2script.common.enums.Emotion;
+import com.novel2script.common.enums.GenerationStatus;
 import com.novel2script.common.enums.ScriptStatus;
 import com.novel2script.common.enums.TimeOfDay;
 import com.novel2script.common.enums.WorkflowStep;
@@ -282,6 +284,10 @@ public class ScriptService {
             scene.setScriptId(scriptId);
             scene.setId(null); // Let DB auto-generate
             scene.setCreatedAt(now);
+            // Generation-status columns default to COMPLETED; only the content
+            // generators mark a scene FAILED (待补全)
+            if (scene.getDialogueStatus() == null) scene.setDialogueStatus(GenerationStatus.COMPLETED);
+            if (scene.getActionStatus() == null) scene.setActionStatus(GenerationStatus.COMPLETED);
             sceneMapper.insert(scene);
 
             // Insert nested dialogues
@@ -290,6 +296,8 @@ public class ScriptService {
                     d.setSceneId(scene.getId());
                     d.setId(null);
                     d.setCreatedAt(now);
+                    // Anything reaching persistence without a stamp is AI output
+                    if (d.getSource() == null) d.setSource(ContentSource.AI);
                     dialogueMapper.insert(d);
                     totalDialogues++;
                 }
@@ -301,6 +309,7 @@ public class ScriptService {
                     a.setSceneId(scene.getId());
                     a.setId(null);
                     a.setCreatedAt(now);
+                    if (a.getSource() == null) a.setSource(ContentSource.AI);
                     actionMapper.insert(a);
                 }
             }
@@ -462,6 +471,8 @@ public class ScriptService {
         action.setId(null);
         action.setSceneId(sceneId);
         action.setCreatedAt(LocalDateTime.now());
+        // Created through the editing API — provenance is human, not AI
+        action.setSource(ContentSource.MANUAL);
         actionMapper.insert(action);
 
         script.setUpdatedAt(LocalDateTime.now());
@@ -482,6 +493,9 @@ public class ScriptService {
         if (updates.containsKey("characterId")) action.setCharacterId(((Number) updates.get("characterId")).longValue());
         if (updates.containsKey("durationMs")) action.setDurationMs(((Number) updates.get("durationMs")).intValue());
 
+        // Edited by a human — mark it so experiment samples and the UI no
+        // longer treat it as untouched AI output
+        action.setSource(ContentSource.MANUAL);
         actionMapper.updateById(action);
 
         Script script = scriptMapper.selectById(scriptId);
@@ -522,6 +536,8 @@ public class ScriptService {
         dialogue.setId(null);
         dialogue.setSceneId(sceneId);
         dialogue.setCreatedAt(LocalDateTime.now());
+        // Created through the editing API — provenance is human, not AI
+        dialogue.setSource(ContentSource.MANUAL);
         dialogueMapper.insert(dialogue);
 
         // Update dialogue count
@@ -551,6 +567,8 @@ public class ScriptService {
         if (updates.containsKey("characterId")) dialogue.setCharacterId(((Number) updates.get("characterId")).longValue());
         if (updates.containsKey("parenthetical")) dialogue.setParenthetical((String) updates.get("parenthetical"));
 
+        // Edited by a human — provenance becomes MANUAL
+        dialogue.setSource(ContentSource.MANUAL);
         dialogueMapper.updateById(dialogue);
 
         Script script = scriptMapper.selectById(scriptId);

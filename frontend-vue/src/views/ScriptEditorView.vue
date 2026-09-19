@@ -18,6 +18,13 @@
           对白缺失 {{ failedDialogueScenes }} 个场景<span v-if="failedActionScenes > 0">，动作缺失 {{ failedActionScenes }} 个场景</span>。
           系统未编造任何台词或动作，请手动补全后再使用（YAML 仍可正常导出）。
         </p>
+        <p v-if="openPendingCount > 0" class="banner-live">
+          仍有 <strong>{{ openPendingCount }}</strong> 个场景待补全 — 对应场景卡片上标有
+          <span class="banner-chip">✎ 待补全</span>，左侧列表为金色实心圆点
+        </p>
+        <p v-else class="banner-live banner-live--done">
+          全部场景已手动补全。失败记录仍保留在各场景卡片上，便于追溯
+        </p>
       </div>
     </div>
 
@@ -51,6 +58,7 @@ import { useRoute } from 'vue-router'
 import { useScriptStore } from '@/stores/script'
 import { useSse } from '@/composables/useSse'
 import { getScript } from '@/lib/api'
+import { openPendingScenes } from '@/lib/generationStatus'
 import ScriptEditor from '@/components/script/ScriptEditor.vue'
 import InkProgress from '@/components/InkProgress.vue'
 
@@ -182,6 +190,16 @@ function readWarningCount(key: string): number {
 
 const failedDialogueScenes = computed(() => readWarningCount('failedDialogueScenes'))
 const failedActionScenes = computed(() => readWarningCount('failedActionScenes'))
+
+/**
+ * Live count of scenes still awaiting manual completion.
+ *
+ * Derived from the scenes themselves rather than from `workflowState`, so it
+ * updates the moment the user adds or removes a paragraph — unlike the
+ * generation-time snapshot above it.
+ */
+const openPendingCount = computed(() => openPendingScenes(script.value?.scenes ?? []).length)
+
 const showProgressOverlay = computed(() =>
   script.value?.status === 'GENERATING' && !generationError.value && progressVisible.value
 )
@@ -253,6 +271,34 @@ const showProgressOverlay = computed(() =>
   font-size: 11px;
   opacity: 0.7;
   margin-top: 2px;
+}
+
+/* Live "still N scenes to patch" line — recomputed from the scene data */
+.banner-live {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.banner-live strong {
+  color: var(--warm-gold-light);
+  font-weight: 700;
+}
+
+.banner-live--done {
+  color: var(--teal-primary);
+  opacity: 0.85;
+}
+
+.banner-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--warm-gold-surface);
+  border: 1px solid rgba(212, 168, 83, 0.3);
+  color: var(--warm-gold-light);
 }
 
 .banner-action {

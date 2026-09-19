@@ -60,6 +60,11 @@
       <span v-if="dialogue.emotion" class="emotion">({{ emotionLabel(dialogue.emotion) }})</span>
       <span v-if="dialogue.parenthetical" class="parenthetical">{{ dialogue.parenthetical }}</span>
       <span class="content">{{ dialogue.content }}</span>
+      <span
+        v-if="dialogue.source && dialogue.source !== 'AI'"
+        class="source-badge"
+        :title="SOURCE_TITLES[dialogue.source]"
+      >{{ SOURCE_LABELS[dialogue.source] }}</span>
       <span v-if="dialogue.replyTo" class="reply-indicator">↳ 回复 #{{ dialogue.replyTo }}</span>
     </div>
   </div>
@@ -74,6 +79,23 @@ import { deleteDialogueParagraph } from '@/lib/api'
 import type { Dialogue } from '@/types/script'
 
 const EMOTIONS = ['NEUTRAL', 'CALM', 'ANGRY', 'SAD', 'HAPPY', 'SURPRISED', 'FEARFUL'] as const
+
+/**
+ * Provenance badges. AI output is the norm and stays unlabelled; anything that
+ * did not come straight from the model is marked so it can be reviewed —
+ * regex-extracted lines especially, since they must be excluded from
+ * experiment samples that measure AI accuracy.
+ */
+const SOURCE_LABELS: Record<NonNullable<Dialogue['source']>, string> = {
+  AI: 'AI',
+  REGEX: '正则抽取',
+  MANUAL: '人工补全',
+}
+const SOURCE_TITLES: Record<NonNullable<Dialogue['source']>, string> = {
+  AI: 'AI 生成',
+  REGEX: '从原文正则抽取（非 AI 生成，实验统计时应剔除）',
+  MANUAL: '人工补全 / 编辑',
+}
 
 const props = defineProps<{
   dialogue: Dialogue
@@ -138,6 +160,9 @@ function handleSave() {
     emotion: localEmotion.value,
     content: trimmedContent,
     parenthetical: localParenthetical.value.trim() || undefined,
+    // The backend re-stamps this row as MANUAL — mirror it locally so the
+    // provenance badge appears without waiting for a refetch
+    source: 'MANUAL',
   })
 
   internalEditing.value = false
@@ -251,6 +276,16 @@ watch(() => isEditing.value, (val) => {
   color: var(--text-primary);
   opacity: 0.9;
   min-width: 0;
+}
+
+.source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warm-gold-surface);
+  color: var(--warm-gold-light);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .reply-indicator {

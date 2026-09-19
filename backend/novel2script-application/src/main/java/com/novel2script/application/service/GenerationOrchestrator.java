@@ -463,6 +463,7 @@ public class GenerationOrchestrator {
                     scenes.size());
             for (Scene scene : scenes) {
                 scene.setDialogues(new ArrayList<>());
+                scene.setDialogueStatus(GenerationStatus.FAILED);
             }
             recordDialogueFailure(scriptId, scenes, scenes.size());
             return scenes;
@@ -499,8 +500,10 @@ public class GenerationOrchestrator {
                     dialogues = dialogueAgent.generate(scene, presentChars, List.of(),
                             prevScene, null, prevDias);
                     if (dialogues != null && !dialogues.isEmpty()) {
+                        markDialogueSource(dialogues, ContentSource.AI);
                         synchronized (scene) {
                             scene.setDialogues(dialogues);
+                            scene.setDialogueStatus(GenerationStatus.COMPLETED);
                             previousDialogues[0] = dialogues; // update for next scene
                         }
                         aiSuccessCount.incrementAndGet();
@@ -511,11 +514,14 @@ public class GenerationOrchestrator {
                     log.debug("AI dialogue failed for '{}': {}", scene.getTitle(), e.getMessage());
                 }
 
-                // Tier 2: regex extraction
+                // Tier 2: regex extraction — deterministic, taken straight from the
+                // source text, so its provenance is REGEX rather than AI
                 dialogues = extractDialoguesFromContext(scene, presentChars);
                 if (!dialogues.isEmpty()) {
+                    markDialogueSource(dialogues, ContentSource.REGEX);
                     synchronized (scene) {
                         scene.setDialogues(dialogues);
+                        scene.setDialogueStatus(GenerationStatus.COMPLETED);
                         previousDialogues[0] = dialogues;
                     }
                     speechFallbackCount.incrementAndGet();
@@ -527,6 +533,7 @@ public class GenerationOrchestrator {
                 // (历史遗留的硬编码台词兜底已移除；现改为显式失败并标记待补全)
                 synchronized (scene) {
                     scene.setDialogues(new ArrayList<>());
+                    scene.setDialogueStatus(GenerationStatus.FAILED);
                 }
                 failedScenes.incrementAndGet();
                 log.warn("对白生成失败，场景 '{}' 标记为待补全（不编造台词）", scene.getTitle());
@@ -562,6 +569,28 @@ public class GenerationOrchestrator {
                 totalDialogues.get(), avgDias, parallelism);
 
         return scenes;
+    }
+
+    /**
+     * Stamp every generated line with its provenance so the DB can later tell
+     * AI output apart from regex-extracted text and human edits.
+     *
+     * <p>Named per content type rather than overloaded: {@code List<Dialogue>}
+     * and {@code List<Action>} erase to the same signature.
+     */
+    private static void markDialogueSource(List<Dialogue> dialogues, ContentSource source) {
+        if (dialogues == null) return;
+        for (Dialogue d : dialogues) {
+            if (d != null) d.setSource(source);
+        }
+    }
+
+    /** Stamp every generated action with its provenance. */
+    private static void markActionSource(List<Action> actions, ContentSource source) {
+        if (actions == null) return;
+        for (Action a : actions) {
+            if (a != null) a.setSource(source);
+        }
     }
 
     /**
@@ -687,6 +716,7 @@ public class GenerationOrchestrator {
                     scenes.size());
             for (Scene scene : scenes) {
                 scene.setActions(new ArrayList<>());
+                scene.setActionStatus(GenerationStatus.FAILED);
             }
             recordActionFailure(scriptId, scenes, scenes.size());
             return scenes;
@@ -709,7 +739,11 @@ public class GenerationOrchestrator {
                 try {
                     List<Action> actions = actionAgent.generate(scene, sceneDialogues, presentChars);
                     if (actions != null && !actions.isEmpty()) {
-                        synchronized (scene) { scene.setActions(actions); }
+                        markActionSource(actions, ContentSource.AI);
+                        synchronized (scene) {
+                            scene.setActions(actions);
+                            scene.setActionStatus(GenerationStatus.COMPLETED);
+                        }
                         aiSuccessCount.incrementAndGet();
                         return;
                     }
@@ -721,6 +755,7 @@ public class GenerationOrchestrator {
                 // (历史遗留的硬编码动作模板兜底已移除；现改为显式失败并标记待补全)
                 synchronized (scene) {
                     scene.setActions(new ArrayList<>());
+                    scene.setActionStatus(GenerationStatus.FAILED);
                 }
                 failedScenes.incrementAndGet();
                 log.warn("动作生成失败，场景 '{}' 标记为待补全（不编造动作）", scene.getTitle());

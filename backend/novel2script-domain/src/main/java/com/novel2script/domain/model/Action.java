@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.novel2script.common.enums.ContentSource;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -37,6 +38,15 @@ public class Action {
     private String actionType;    // ACTION / REACTION / BEAT / BUSINESS
 
     private String description;
+
+    /**
+     * How this action was produced: AI / REGEX / MANUAL.
+     *
+     * <p>The DB column defaults to {@link ContentSource#AI}; manual edits are
+     * marked by {@code ScriptService}.
+     */
+    @TableField("source")
+    private ContentSource source;
 
     @TableField("duration_ms")
     private Integer durationMs;   // estimated duration in milliseconds

@@ -10,6 +10,7 @@
         :key="scene.id"
         class="scene-item"
         :class="{ 'scene-item--active': selectedSceneId === scene.id }"
+        :title="sceneTooltip(scene)"
         @click="store.selectScene(scene.id)"
       >
         <span class="scene-num">{{ String(scene.sceneNumber).padStart(2, '0') }}</span>
@@ -17,7 +18,7 @@
           <span class="scene-title">{{ scene.title || '未命名场景' }}</span>
           <span class="scene-loc">{{ sceneHeaderText(scene) }}</span>
         </div>
-        <span class="scene-status-dot" :class="selectedSceneId === scene.id ? 'ss--active' : ''"></span>
+        <span class="scene-status-dot" :class="dotClass(scene)"></span>
       </div>
     </div>
   </div>
@@ -27,6 +28,7 @@
 import { computed } from 'vue'
 import { useScriptStore } from '@/stores/script'
 import { sanitizeSceneHeading } from '@/lib/utils'
+import { failedKinds, pendingState, KIND_LABELS } from '@/lib/generationStatus'
 import type { Scene } from '@/types/script'
 
 defineProps<{
@@ -46,6 +48,30 @@ function sceneHeaderText(scene: Scene): string {
     loc += ` · ${scene.timeOfDay}`
   }
   return loc
+}
+
+// ── Generation-status dot ──
+// FAILED is a permanent fact: manual edits only flip an item's `source` to
+// MANUAL, never the scene-level status. So the dot keeps a gold trace even
+// after the scene has been patched up — 'open' means something is still missing.
+function dotClass(scene: Scene): string[] {
+  const state = pendingState(scene)
+  return [
+    selectedSceneId.value === scene.id ? 'ss--active' : '',
+    state === 'open' ? 'ss--pending' : '',
+    state === 'patched' ? 'ss--patched' : '',
+  ]
+}
+
+function sceneTooltip(scene: Scene): string {
+  const state = pendingState(scene)
+  if (state === 'none') return sceneHeaderText(scene)
+
+  const what = `${failedKinds(scene).map((k) => KIND_LABELS[k]).join('与')}生成`
+
+  return state === 'open'
+    ? `${what}失败，待手动补全`
+    : `${what}曾失败，已手动补全（失败记录保留）`
 }
 </script>
 
@@ -156,11 +182,27 @@ function sceneHeaderText(scene: Scene): string {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
+  box-sizing: border-box;
+  transition: all 0.2s;
 }
 
 .ss--active {
   background: var(--teal-primary);
   box-shadow: 0 0 6px var(--teal-glow);
+}
+
+/* Generation failed here and nothing has been filled in yet — needs attention.
+   Declared after .ss--active so it wins when a scene is both selected and open. */
+.ss--pending {
+  background: var(--warm-gold);
+  box-shadow: 0 0 6px var(--warm-gold-glow);
+}
+
+/* Generation failed here but the gap was closed by hand — keep a faint trace
+   so "which scenes were broken" stays traceable at a glance */
+.ss--patched {
+  background: transparent;
+  border: 1.5px solid var(--warm-gold-muted);
 }
 
 .btn-add-scene {

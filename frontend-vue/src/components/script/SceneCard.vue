@@ -1,7 +1,10 @@
 <template>
   <div
     class="scene-card"
-    :class="{ 'scene-card--selected': isSelected }"
+    :class="{
+      'scene-card--selected': isSelected,
+      'scene-card--pending': hasOpenPending,
+    }"
     @click="store.selectScene(scene.id)"
   >
     <!-- Selected indicator line -->
@@ -21,6 +24,16 @@
         </div>
       </div>
       <div class="header-right">
+        <span
+          v-for="badge in pendingBadges"
+          :key="badge.key"
+          class="pending-badge"
+          :class="badge.resolved ? 'pending-badge--resolved' : 'pending-badge--open'"
+          :title="badge.title"
+        >
+          <span class="pending-badge-icon">{{ badge.resolved ? '✓' : '✎' }}</span>
+          {{ badge.label }}
+        </span>
         <span v-if="scene.mood" class="mood-badge">{{ scene.mood }}</span>
       </div>
     </div>
@@ -39,7 +52,11 @@
     <div class="content-area">
       <!-- Empty state -->
       <div v-if="contentItems.length === 0" class="empty-state">
-        <p>此场景暂无内容</p>
+        <p v-if="hasFailedGeneration" class="empty-pending">
+          <span class="empty-pending-icon">✎</span>
+          AI 未生成本场景的{{ failedParts.join('与') }}（系统未编造内容），请手动补全
+        </p>
+        <p v-else>此场景暂无内容</p>
         <button
           v-if="editable"
           class="btn-add-first"
@@ -145,6 +162,8 @@
 import { ref, computed, watch, reactive } from 'vue'
 import { useScriptStore } from '@/stores/script'
 import { sanitizeSceneHeading, formatTimeOfDay } from '@/lib/utils'
+import { failedKinds, manualCount, pendingState, KIND_LABELS } from '@/lib/generationStatus'
+import type { ContentKind } from '@/lib/generationStatus'
 import { toast } from '@/stores/toast'
 import { deleteAction, deleteDialogueParagraph, addAction, addDialogue } from '@/lib/api'
 import DialogueBlock from './DialogueBlock.vue'
@@ -209,6 +228,41 @@ const displayLocation = computed(() => {
 })
 
 const displayTime = computed(() => formatTimeOfDay(props.scene.timeOfDay))
+
+// ── Generation provenance badges ──
+// A scene flagged FAILED keeps that flag for good: manual completion only
+// flips an individual item's `source` to MANUAL, never the scene-level status.
+// That keeps "which scenes failed, and who patched them" traceable, while the
+// badge still shows how far the human has filled the gap.
+interface PendingBadge {
+  key: ContentKind
+  label: string
+  title: string
+  resolved: boolean
+}
+
+const failedParts = computed(() => failedKinds(props.scene).map((k) => KIND_LABELS[k]))
+
+const hasFailedGeneration = computed(() => failedParts.value.length > 0)
+
+const pendingBadges = computed<PendingBadge[]>(() =>
+  failedKinds(props.scene).map((kind) => {
+    const kindLabel = KIND_LABELS[kind]
+    const n = manualCount(props.scene, kind)
+    const resolved = n > 0
+    return {
+      key: kind,
+      resolved,
+      label: resolved ? `${kindLabel}已补 ${n} 条` : `${kindLabel}待补全`,
+      title: resolved
+        ? `本场景${kindLabel}生成曾失败，已手动补全 ${n} 条（失败标记保留，便于追溯）`
+        : `本场景${kindLabel}生成失败，系统未编造内容，请手动补全`,
+    }
+  })
+)
+
+/** Card-level amber outline — only while something is still unpatched. */
+const hasOpenPending = computed(() => pendingState(props.scene) === 'open')
 
 // ── Reorder sequences ──
 function renumberSequences(items: ContentItem[]) {
@@ -343,6 +397,10 @@ async function handleInsert(afterIdx: number, data: {
         speaker: data.characterName ?? '未知',
         emotion: data.emotion ?? 'NEUTRAL',
         content: data.content,
+        // Added through the editing API — the backend stamps it MANUAL, so
+        // mirror that locally; otherwise a patched scene would still look
+        // 待补全 until the page is refetched
+        source: 'MANUAL',
         parenthetical: undefined,
         replyTo: undefined,
       }
@@ -360,6 +418,8 @@ async function handleInsert(afterIdx: number, data: {
         sequence: newSeq,
         actionType: data.paraType,
         description: data.content,
+        // Broken generation was fixed by hand — see newDialogue above
+        source: 'MANUAL',
         durationMs: undefined,
       }
       const merged = getSortedContent([...s.actions, newAction], s.dialogues)
@@ -391,6 +451,12 @@ async function handleInsert(afterIdx: number, data: {
 .scene-card:hover {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* Amber outline while the scene still waits for manual completion.
+   Declared before the selected state so selection wins the border. */
+.scene-card--pending {
+  border-color: rgba(212, 168, 83, 0.22);
 }
 
 .scene-card--selected {
@@ -482,6 +548,37 @@ async function handleInsert(afterIdx: number, data: {
   color: var(--text-secondary);
 }
 
+/* ── Generation-provenance badges ── */
+.pending-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.pending-badge-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Still unpatched — needs human attention */
+.pending-badge--open {
+  background: var(--warm-gold-surface);
+  color: var(--warm-gold-light);
+  border: 1px solid rgba(212, 168, 83, 0.3);
+}
+
+/* Patched — the badge stays (the failure fact is kept) but calms down */
+.pending-badge--resolved {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--warm-gold-muted);
+  border: 1px solid rgba(212, 168, 83, 0.16);
+}
+
 /* Characters */
 .scene-chars {
   display: flex;
@@ -524,6 +621,26 @@ async function handleInsert(afterIdx: number, data: {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 12px;
+}
+
+/* Replaces the neutral "此场景暂无内容" when generation failed here */
+.empty-state .empty-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--warm-gold-light);
+  background: var(--warm-gold-surface);
+  border: 1px dashed rgba(212, 168, 83, 0.3);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+}
+
+.empty-pending-icon {
+  flex-shrink: 0;
 }
 
 .btn-add-first {

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.novel2script.domain.handler.LongListTypeHandler;
+import com.novel2script.common.enums.GenerationStatus;
 import com.novel2script.common.enums.SourceReason;
 import com.novel2script.common.enums.TimeOfDay;
 import lombok.AllArgsConstructor;
@@ -61,6 +62,25 @@ public class Scene {
 
     @TableField("source_reason")
     private SourceReason sourceReason;
+
+    /**
+     * Whether dialogue generation succeeded for this scene.
+     *
+     * <p>{@link GenerationStatus#FAILED} means every path (AI, then regex
+     * extraction) failed and the scene was deliberately left with no dialogue
+     * for manual completion — nothing was fabricated to fill it.
+     */
+    @TableField("dialogue_status")
+    private GenerationStatus dialogueStatus;
+
+    /**
+     * Whether action generation succeeded for this scene.
+     *
+     * <p>{@link GenerationStatus#FAILED} means the scene has no actions and
+     * awaits manual completion.
+     */
+    @TableField("action_status")
+    private GenerationStatus actionStatus;
 
     @TableField("scene_heading")
     private String sceneHeading;
