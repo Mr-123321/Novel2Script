@@ -4,7 +4,7 @@ import com.novel2script.domain.model.Chapter;
 import com.novel2script.domain.model.Novel;
 import com.novel2script.domain.model.NovelChunk;
 import com.novel2script.infrastructure.vector.EmbeddingService;
-import com.novel2script.infrastructure.vector.MilvusVectorStore;
+import com.novel2script.infrastructure.vector.InMemoryVectorStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -218,14 +218,14 @@ class LongNovelProcessorTest {
     class ContextBuilderTests {
 
         private EmbeddingService embeddingService;
-        private MilvusVectorStore vectorStore;
+        private InMemoryVectorStore vectorStore;
         private ContextBuilder contextBuilder;
         private List<NovelChunk> chunks;
 
         @BeforeEach
         void setUp() {
             embeddingService = new EmbeddingService(null); // hash-based fallback
-            vectorStore = new MilvusVectorStore();
+            vectorStore = new InMemoryVectorStore();
             contextBuilder = new ContextBuilder(embeddingService, vectorStore);
 
             // Create and embed some chunks
@@ -317,7 +317,7 @@ class LongNovelProcessorTest {
         @BeforeEach
         void setUp() {
             EmbeddingService embService = new EmbeddingService(null);
-            MilvusVectorStore vs = new MilvusVectorStore();
+            InMemoryVectorStore vs = new InMemoryVectorStore();
             NovelChunker chunker = new NovelChunker();
             ContextBuilder cb = new ContextBuilder(embService, vs);
             processor = new LongNovelProcessor(chunker, embService, vs, cb);
@@ -492,7 +492,7 @@ class LongNovelProcessorTest {
             );
 
             EmbeddingService embService = new EmbeddingService(null);
-            MilvusVectorStore vs = new MilvusVectorStore();
+            InMemoryVectorStore vs = new InMemoryVectorStore();
             NovelChunker chunker = new NovelChunker();
             ContextBuilder cb = new ContextBuilder(embService, vs);
             LongNovelProcessor processor = new LongNovelProcessor(chunker, embService, vs, cb);
@@ -526,7 +526,7 @@ class LongNovelProcessorTest {
         @DisplayName("检索精度：Top-20 chunk 应覆盖足够内容")
         void shouldCoverEnoughWithTop20() {
             EmbeddingService embService = new EmbeddingService(null);
-            MilvusVectorStore vs = new MilvusVectorStore();
+            InMemoryVectorStore vs = new InMemoryVectorStore();
             NovelChunker chunker = new NovelChunker();
             ContextBuilder cb = new ContextBuilder(embService, vs);
 

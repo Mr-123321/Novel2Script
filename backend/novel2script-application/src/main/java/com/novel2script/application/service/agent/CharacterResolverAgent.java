@@ -13,7 +13,7 @@ import com.novel2script.infrastructure.config.AiModelRouter;
 import com.novel2script.infrastructure.prompt.PromptRegistry;
 import com.novel2script.infrastructure.prompt.PromptTemplate;
 import com.novel2script.infrastructure.vector.EmbeddingService;
-import com.novel2script.infrastructure.vector.MilvusVectorStore;
+import com.novel2script.infrastructure.vector.InMemoryVectorStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -62,7 +62,7 @@ public class CharacterResolverAgent {
             "师兄", "师姐", "师弟", "师妹", "师父", "师傅", "同学"
     );
 
-    private final MilvusVectorStore vectorStore;
+    private final InMemoryVectorStore vectorStore;
     private final EmbeddingService embeddingService;
     private final AiModelRouter modelRouter;
     private final PromptRegistry promptRegistry;
@@ -75,7 +75,7 @@ public class CharacterResolverAgent {
      */
     private final boolean useEmbeddingMerge;
 
-    public CharacterResolverAgent(MilvusVectorStore vectorStore,
+    public CharacterResolverAgent(InMemoryVectorStore vectorStore,
                                    EmbeddingService embeddingService,
                                    AiModelRouter modelRouter,
                                    PromptRegistry promptRegistry,

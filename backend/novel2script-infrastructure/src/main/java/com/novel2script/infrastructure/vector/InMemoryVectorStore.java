@@ -20,10 +20,13 @@ import java.util.stream.Collectors;
  * <p>In production, this would be replaced with the real Milvus client
  * (e.g., {@code io.milvus:milvus-sdk-java}). The API is designed to be
  * compatible with a future Milvus migration.
+ *
+ * <p>本实现为进程内向量存储，用于替代 Milvus 以降低部署复杂度；
+ * 接口设计与 Milvus SDK 兼容，可平滑迁移到真实的分布式向量数据库。
  */
 @Slf4j
 @Service
-public class MilvusVectorStore {
+public class InMemoryVectorStore {
 
     /**
      * Internal storage: characterId → stored vector entry.
@@ -58,11 +61,11 @@ public class MilvusVectorStore {
     public void insertCharacter(String characterId, float[] embedding,
                                  Map<String, Object> metadata) {
         if (characterId == null || characterId.isBlank()) {
-            log.warn("MilvusVectorStore: insertCharacter called with blank characterId");
+            log.warn("InMemoryVectorStore: insertCharacter called with blank characterId");
             return;
         }
         if (embedding == null || embedding.length == 0) {
-            log.warn("MilvusVectorStore: insertCharacter called with empty embedding for '{}'",
+            log.warn("InMemoryVectorStore: insertCharacter called with empty embedding for '{}'",
                     characterId);
             return;
         }
@@ -74,7 +77,7 @@ public class MilvusVectorStore {
         // ── Keyword indexing ──
         indexKeywords(characterId, metadata);
 
-        log.debug("MilvusVectorStore: inserted vector for '{}', dim={}", characterId, embedding.length);
+        log.debug("InMemoryVectorStore: inserted vector for '{}', dim={}", characterId, embedding.length);
     }
 
     /**
@@ -283,7 +286,7 @@ public class MilvusVectorStore {
     public void deleteCharacter(String characterId) {
         StoredVector removed = store.remove(characterId);
         if (removed != null) {
-            log.debug("MilvusVectorStore: removed vector for '{}'", characterId);
+            log.debug("InMemoryVectorStore: removed vector for '{}'", characterId);
         }
     }
 
@@ -317,7 +320,7 @@ public class MilvusVectorStore {
         store.clear();
         keywordIndex.clear();
         docCount.set(0);
-        log.info("MilvusVectorStore: cleared {} vectors and {} keyword entries", vectorCount, keywordCount);
+        log.info("InMemoryVectorStore: cleared {} vectors and {} keyword entries", vectorCount, keywordCount);
     }
 
     /**

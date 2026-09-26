@@ -3,7 +3,7 @@ package com.novel2script.application.service.processor;
 import com.novel2script.domain.model.NovelChunk;
 import com.novel2script.domain.vector.SimilarityResult;
 import com.novel2script.infrastructure.vector.EmbeddingService;
-import com.novel2script.infrastructure.vector.MilvusVectorStore;
+import com.novel2script.infrastructure.vector.InMemoryVectorStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * <h3>Process</h3>
  * <ol>
  *   <li>Embed the task query (e.g., "提取所有角色信息")</li>
- *   <li>Search Milvus for top-K relevant chunks</li>
+ *   <li>Search the vector store for top-K relevant chunks</li>
  *   <li>Re-order by original chunk index (preserving narrative order)</li>
  *   <li>Concatenate up to the max token limit</li>
  * </ol>
@@ -44,9 +44,9 @@ public class ContextBuilder {
     private static final int DEFAULT_TOP_K = 25;
 
     private final EmbeddingService embeddingService;
-    private final MilvusVectorStore vectorStore;
+    private final InMemoryVectorStore vectorStore;
 
-    public ContextBuilder(EmbeddingService embeddingService, MilvusVectorStore vectorStore) {
+    public ContextBuilder(EmbeddingService embeddingService, InMemoryVectorStore vectorStore) {
         this.embeddingService = embeddingService;
         this.vectorStore = vectorStore;
     }
@@ -77,7 +77,7 @@ public class ContextBuilder {
         // 2. Embed the task query
         float[] queryEmbedding = embeddingService.embed(taskQuery);
 
-        // 3. Retrieve relevant chunks from Milvus
+        // 3. Retrieve relevant chunks from the vector store
         List<SimilarityResult> results = vectorStore.searchSimilar(queryEmbedding, topK, MIN_SIMILARITY);
 
         if (results.isEmpty()) {

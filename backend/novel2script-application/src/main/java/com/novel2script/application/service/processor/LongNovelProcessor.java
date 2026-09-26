@@ -3,7 +3,7 @@ package com.novel2script.application.service.processor;
 import com.novel2script.domain.model.Novel;
 import com.novel2script.domain.model.NovelChunk;
 import com.novel2script.infrastructure.vector.EmbeddingService;
-import com.novel2script.infrastructure.vector.MilvusVectorStore;
+import com.novel2script.infrastructure.vector.InMemoryVectorStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <h3>Pipeline</h3>
  * <pre>
- *   Novel → Chunking → Embedding → Milvus Storage
+ *   Novel → Chunking → Embedding → Vector Store
  *     ↓
  *   For each analysis task:
  *     Task Query → Vector Search → Context Assembly → AI Call → Result
@@ -51,12 +51,12 @@ public class LongNovelProcessor {
 
     private final NovelChunker chunker;
     private final EmbeddingService embeddingService;
-    private final MilvusVectorStore vectorStore;
+    private final InMemoryVectorStore vectorStore;
     private final ContextBuilder contextBuilder;
 
     public LongNovelProcessor(NovelChunker chunker,
                               EmbeddingService embeddingService,
-                              MilvusVectorStore vectorStore,
+                              InMemoryVectorStore vectorStore,
                               ContextBuilder contextBuilder) {
         this.chunker = chunker;
         this.embeddingService = embeddingService;
@@ -209,7 +209,7 @@ public class LongNovelProcessor {
     // ── Internal ────────────────────────────────────────
 
     /**
-     * Batch-embed all chunks and store in Milvus.
+     * Batch-embed all chunks and store in the vector store.
      */
     private void embedAndStore(List<NovelChunk> chunks) {
         AtomicInteger stored = new AtomicInteger(0);
@@ -241,7 +241,7 @@ public class LongNovelProcessor {
             }
         }
 
-        log.info("LongNovelProcessor: stored {} vectors in Milvus", stored.get());
+        log.info("LongNovelProcessor: stored {} vectors in vector store", stored.get());
     }
 
     /**

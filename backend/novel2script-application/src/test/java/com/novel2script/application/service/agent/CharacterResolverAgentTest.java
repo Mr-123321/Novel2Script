@@ -6,7 +6,7 @@ import com.novel2script.application.service.agent.model.ExtractedRelationship;
 import com.novel2script.common.enums.CharacterRoleType;
 import com.novel2script.domain.model.Character;
 import com.novel2script.infrastructure.vector.EmbeddingService;
-import com.novel2script.infrastructure.vector.MilvusVectorStore;
+import com.novel2script.infrastructure.vector.InMemoryVectorStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -26,12 +26,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class CharacterResolverAgentTest {
 
     private CharacterResolverAgent agent;
-    private MilvusVectorStore vectorStore;
+    private InMemoryVectorStore vectorStore;
     private EmbeddingService embeddingService;
 
     @BeforeEach
     void setUp() {
-        vectorStore = new MilvusVectorStore();
+        vectorStore = new InMemoryVectorStore();
         embeddingService = new EmbeddingService(null);
         // Only rule-based + embedding layers (no LLM in unit tests)
         agent = new CharacterResolverAgent(vectorStore, embeddingService,
