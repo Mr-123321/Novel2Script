@@ -185,7 +185,7 @@ graph TB
         H["GenerationOrchestrator<br/>生成编排器"]
         I["ScriptGenerationAgent<br/>单次AI调用Agent"]
         J["WorkflowEngine<br/>工作流引擎"]
-        K["ExportService<br/>导出服务"]
+        K["ScriptService<br/>剧本/导出服务"]
         L["各 Agent<br/>Character/Dialogue/Action/Scene"]
     end
 
@@ -316,7 +316,7 @@ sequenceDiagram
 |------|----------|------|
 | **编码自动检测** | `decodeWithDetection()` 方法 | 支持 ASCII 自动检测，包含双重编码修复逻辑 |
 | **SSE 实时推送** | Spring Event + `SseEmitter` | `ScriptProgressChangedEvent` 驱动，进度变化时自动推送 |
-| **多格式导出** | `ExportController` + `ExportService` | 支持 YAML、TXT、Markdown 三种格式的在线查看和下载 |
+| **多格式导出** | `ExportController` + `ScriptService` | 支持 YAML、TXT、Markdown 三种格式的在线查看和下载 |
 
 #### 📦 **应用服务层（novel2script-application）**
 
@@ -326,7 +326,7 @@ sequenceDiagram
 - `WorkflowEngine.java` - 工作流引擎
 - `WorkflowStateManager.java` - 工作流状态管理
 - `WorkflowDefinitions.java` - 工作流步骤定义
-- `ExportService.java` - 导出服务
+- `ScriptService.java` / `YamlExporter` - 多格式导出（YAML/TXT/Markdown）
 - 多个 Agent：`CharacterAgent`、`DialogueAgent`、`ActionAgent`、`SceneAgent`、`ScriptComposer`、`CharacterResolverAgent`
 
 **关键功能：**
@@ -337,7 +337,7 @@ sequenceDiagram
 | **ScriptGenerationAgent** | v2.0 单次 AI 调用 | 先生成角色+场景大纲，再并行填充对白/动作 |
 | **WorkflowEngine** | 工作流执行引擎 | 并行执行、依赖解析、重试机制、断点续传 |
 | **SceneAgent** | 场景切分 | 并行逐章切分（MAX_PARALLEL=5），PromptCache 缓存 |
-| **ExportService** | 多格式导出 | SnakeYAML + 自定义 Representer + Schema 验证 |
+| **ScriptService / YamlExporter** | 多格式导出 | SnakeYAML + 自定义 Representer + Schema 验证 |
 
 #### 📦 **基础设施层（novel2script-infrastructure）**
 

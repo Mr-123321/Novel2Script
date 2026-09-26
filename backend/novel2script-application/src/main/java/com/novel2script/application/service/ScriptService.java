@@ -180,6 +180,25 @@ public class ScriptService {
         return generateMd(script);
     }
 
+    /**
+     * Ensure the script is ready for export (generation must have finished).
+     * {@link com.novel2script.common.enums.ScriptStatus#COMPLETED_WITH_WARNINGS}
+     * counts as finished: gaps are left empty on purpose instead of being filled
+     * with fabricated content.
+     *
+     * <p>Migrated from the removed {@code ExportService} so the export gate stays a
+     * first-class, tested invariant of the export path.
+     */
+    public void ensureExportable(Script script) {
+        if (script == null) {
+            throw new BusinessException("SCRIPT_NOT_FOUND", "Script not found");
+        }
+        if (!script.isGenerated()) {
+            throw new BusinessException("SCRIPT_NOT_COMPLETED",
+                    "Script must be COMPLETED or COMPLETED_WITH_WARNINGS before export. Current: " + script.getStatus());
+        }
+    }
+
     public List<Script> listAll() {
         List<Script> scripts = scriptMapper.selectList(null);
         // Do NOT assemble full graph for list view (performance)

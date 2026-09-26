@@ -93,11 +93,12 @@ class ScriptStatusWarningsTest {
     }
 
     @Nested
-    @DisplayName("导出门禁（ExportService.ensureExportable）")
+    @DisplayName("导出门禁（ScriptService.ensureExportable）")
     class ExportGate {
 
         /** ensureExportable only inspects the passed script — deps are unused here. */
-        private final ExportService exportService = new ExportService(null, null);
+        private final ScriptService scriptService =
+                new ScriptService(null, null, null, null, null, null, null, null);
 
         @Test
         @DisplayName("COMPLETED_WITH_WARNINGS 允许导出")
@@ -105,7 +106,7 @@ class ScriptStatusWarningsTest {
             Script script = new Script();
             script.completeWithWarnings();
 
-            assertThatCode(() -> exportService.ensureExportable(script)).doesNotThrowAnyException();
+            assertThatCode(() -> scriptService.ensureExportable(script)).doesNotThrowAnyException();
         }
 
         @Test
@@ -114,7 +115,7 @@ class ScriptStatusWarningsTest {
             Script script = new Script();
             script.complete();
 
-            assertThatCode(() -> exportService.ensureExportable(script)).doesNotThrowAnyException();
+            assertThatCode(() -> scriptService.ensureExportable(script)).doesNotThrowAnyException();
         }
 
         @Test
@@ -123,7 +124,7 @@ class ScriptStatusWarningsTest {
             Script script = new Script();
             script.startGeneration();
 
-            assertThatThrownBy(() -> exportService.ensureExportable(script))
+            assertThatThrownBy(() -> scriptService.ensureExportable(script))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("COMPLETED_WITH_WARNINGS");
         }
@@ -131,7 +132,7 @@ class ScriptStatusWarningsTest {
         @Test
         @DisplayName("脚本为 null 时抛出 SCRIPT_NOT_FOUND")
         void rejectsNullScript() {
-            assertThatThrownBy(() -> exportService.ensureExportable(null))
+            assertThatThrownBy(() -> scriptService.ensureExportable(null))
                     .isInstanceOf(BusinessException.class);
         }
     }
