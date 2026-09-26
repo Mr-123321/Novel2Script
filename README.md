@@ -62,7 +62,7 @@ CREATE DATABASE IF NOT EXISTS novel2script
   DEFAULT COLLATE utf8mb4_unicode_ci;
 ```
 
-> Flyway 会在应用首次启动时自动执行所有迁移脚本（`V1` ~ `V6`），无需手动建表。
+> Flyway 会在应用首次启动时自动执行所有迁移脚本（`V1` ~ `V8`），无需手动建表。
 
 ### 3. 后端配置
 
@@ -158,7 +158,10 @@ cd backend
     *   ✨ 实现 **多步流水线**（默认路径）与 **单次 AI 调用**（v2.0 分段，配置开关控制、默认关闭）两种生成架构
     *   ✨ 新增 **SSE 实时进度推送** 和 **多格式导出**（YAML / TXT / Markdown）
     *   ✨ 新增 **工作流引擎**（WorkflowEngine）支持并行执行、依赖解析和容错重试
-    *   ✨ 集成 **MyBatis-Plus + Flyway** 数据库持久化（MySQL，6 版迁移脚本）
+    *   ✨ 集成 **MyBatis-Plus + Flyway** 数据库持久化（MySQL，8 版迁移脚本）
+    *   🛡️ **数据可信性加固（当前版本重点）**：拆除全部 mock / 编造层 —— 生成失败显式记录（内容置空 + 失败明细写入 workflowState），绝不伪造数据
+    *   🛡️ **部分成功语义**：新增 `COMPLETED_WITH_WARNINGS` 终态，存在待补全场景时不谎报 COMPLETED、也不整体丢弃成果；SSE 推送与前端琥珀色告警横幅同步
+    *   🛡️ **内容来源溯源（provenance）**：每条对白/动作记录产生路径（AI 生成 / 正则抽取 / 人工补全），场景级失败状态永久保留、不可翻转，并有守护测试固化上述不变量
 
 ---
 
@@ -389,6 +392,8 @@ sequenceDiagram
 | V4 | 外键约束修复 |
 | V5 | MyBatis-Plus 兼容性修复 |
 | V6 | JSON 列默认值修复 |
+| V7 | `scripts.status` 列宽扩展（VARCHAR(20) → VARCHAR(32)），容纳 `COMPLETED_WITH_WARNINGS` |
+| V8 | 内容来源溯源：`dialogues`/`actions` 增加 `source`（AI / REGEX / MANUAL），`scenes` 增加对白/动作两级失败状态 |
 
 #### 📦 **领域模型层（novel2script-domain）**
 
