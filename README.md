@@ -348,7 +348,7 @@ sequenceDiagram
 - `AiModelRouter.java` - AI 模型路由器（根据 TaskType 选择模型）
 - `PromptRegistry.java` - 提示词注册表（从 classpath 加载 YAML 模板）
 - `PromptCache.java` - Caffeine 缓存（MD5 key，TTL 120 分钟）
-- `MilvusVectorStore.java` - 向量存储（角色消歧 Layer 2）
+- `MilvusVectorStore.java` - 向量存储（生产中用于角色消歧 Layer 2；长文本分块管线基于它实现但未接入主流程，见第 6 节）
 - `EmbeddingService.java` - 嵌入服务
 - `SpringAiConfig.java` - Spring AI 多模型配置
 - `MultiModelProperties.java` - 多模型配置属性
@@ -588,3 +588,26 @@ script:
 ✨ **容错机制：** 单次生成失败自动回退到多步流水线（需开启 single-pass），支持部分结果保存和恢复
 
 ✨ **中文 JSON 兼容：** 自动识别并转换 AI 返回的中文 JSON 键名（如 角色列表→characters）
+
+---
+
+## 6. 已实现但未接入的模块（未来工作）
+
+> 如实说明：以下模块**已完成实现与单元测试，但尚未接入生成主流程**，避免"文档宣传 > 实际运行"的落差。
+
+### 6.1 长文本分块处理管线（`service/processor/`）
+
+| 类 | 职责 | 状态 |
+|----|------|------|
+| `NovelChunker` | 按章节 + token 预算分块（~2000 token/块、句感知、中英文 token 估算） | 已实现 + 单测，未接入 |
+| `ContextBuilder` | 向量检索 / 混合检索，并在 token 预算内按叙事顺序组装上下文 | 已实现 + 单测，未接入 |
+| `LongNovelProcessor` | 串联分块 → 向量化 → Milvus 存储 → 检索的预处理编排入口 | 已实现 + 单测，未接入 |
+
+- **当前主流程的替代方案**：`ScriptGenerationAgent.buildPromptWithTruncation()` 在构建提示词时按 `chapter-truncate-chars`（默认 2000 字/章）直接截断章节内容。
+- **未接入原因**：
+  1. 多步流水线并行化后，简单截断已满足 5-10 章规模小说的质量与时延要求；
+  2. 向量化入库会让 Milvus 从"角色消歧的可选组件"变为"生成主链路的强依赖"，增加部署复杂度；
+  3. 缺少 50 万字以上超长篇小说的实测数据，收益未经验证。
+- **未来工作**：面向超长篇小说（50 万字+）启用语义检索上下文构建（分块 → 向量化 → 检索 → 组装），接入点为各分析 Agent 的任务查询构建；详细方案见论文「总结与展望」。
+
+> 注：`MilvusVectorStore` 本身已在生产中使用（角色消歧 Layer 2），未接入的仅是基于它的长文本分块管线。

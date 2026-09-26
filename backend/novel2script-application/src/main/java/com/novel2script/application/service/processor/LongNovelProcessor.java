@@ -12,6 +12,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
+ * <p><b>NOTE(实验性)</b>: 本模块已完成实现与单元测试，但<b>未接入生成主流程</b>；
+ * 当前主流程由 {@code ScriptGenerationAgent#buildPromptWithTruncation} 在构建提示词时
+ * 对章节内容做简单截断。接入方案见论文「总结与展望」。
+ *
  * Processes long novels (500K+ characters) by chunking, embedding, and using
  * vector retrieval to build targeted context windows for each analysis task.
  *
