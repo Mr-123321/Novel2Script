@@ -1,8 +1,14 @@
 package com.novel2script.application.service;
 
 import com.novel2script.application.service.agent.*;
-import com.novel2script.application.service.agent.model.CharacterExtractionResult;
 import com.novel2script.application.service.agent.model.CompositionInput;
+import com.novel2script.application.service.workflow.AgentBundle;
+import com.novel2script.application.service.workflow.GenerationContext;
+import com.novel2script.application.service.workflow.WorkflowDefinitions;
+import com.novel2script.application.service.workflow.WorkflowEngine;
+import com.novel2script.application.service.workflow.model.StepStatus;
+import com.novel2script.application.service.workflow.model.Workflow;
+import com.novel2script.application.service.workflow.model.WorkflowProgress;
 import com.novel2script.common.enums.*;
 import com.novel2script.domain.model.Action;
 import com.novel2script.domain.model.Chapter;
@@ -60,6 +66,10 @@ public class GenerationOrchestrator {
     /** Global counter for dialogue IDs assigned in fallback extraction */
     private final java.util.concurrent.atomic.AtomicLong dialogueIdSeq = new java.util.concurrent.atomic.AtomicLong(50000);
 
+    // ── W14: workflow engine（主链路接入）──
+    private final WorkflowEngine workflowEngine;
+    private final WorkflowDefinitions workflowDefinitions;
+
     public GenerationOrchestrator(ScriptService scriptService,
                                   NovelService novelService,
                                   AiModelRouter modelRouter,
@@ -72,7 +82,9 @@ public class GenerationOrchestrator {
                                   SceneAgent sceneAgent,
                                   DialogueAgent dialogueAgent,
                                   ActionAgent actionAgent,
-                                  ScriptComposer scriptComposer) {
+                                  ScriptComposer scriptComposer,
+                                  WorkflowEngine workflowEngine,
+                                  WorkflowDefinitions workflowDefinitions) {
         this.scriptService = scriptService;
         this.novelService = novelService;
         this.modelRouter = modelRouter;
@@ -86,6 +98,8 @@ public class GenerationOrchestrator {
         this.dialogueAgent = dialogueAgent;
         this.actionAgent = actionAgent;
         this.scriptComposer = scriptComposer;
+        this.workflowEngine = workflowEngine;
+        this.workflowDefinitions = workflowDefinitions;
         log.info("GenerationOrchestrator: singlePassEnabled={}, singlePassStaged={}",
                 singlePassEnabled, singlePassStaged);
     }
@@ -265,131 +279,100 @@ public class GenerationOrchestrator {
     }
 
     /**
-     * Legacy multi-step pipeline as fallback when single-pass fails.
-     * <p>
-     * If single-pass v2.0 (staged) already saved characters and scene outlines
-     * (partial result), this method skips directly to dialogue/action generation.
+     * Engine-driven multi-step pipeline (W14).
+     *
+     * <p>构建 {@link GenerationContext}（每剧本独立实例，方法内局部变量，
+     * <b>绝不存为本类字段</b> —— Spring 单例并发安全），用 {@link AgentBundle}
+     * 打包 7 个真实 Agent，交给 {@link WorkflowEngine} 按
+     * {@link WorkflowDefinitions#fullGenerationWorkflow} 的 9 步依赖图执行：
+     * 角色链路与情节/场景链路并行，DIALOGUE 与 ACTION 并行
+     * （Scene 突变 synchronized），失败重试、依赖失败下游自动 SKIPPED。
+     *
+     * <p>落库与终态由本方法承担：引擎只做内存编排（ctx），join 后统一
+     * updateCharacters / updateScenes / setTitle，再按 ctx 失败计数决定
+     * COMPLETED / COMPLETED_WITH_WARNINGS（W01/W02 语义不变）。
+     *
+     * <p>⚠️ 行为变更（相对旧手写流水线）：单次调用部分成功后的「断点续跑」
+     * （hasPartialResult 跳过角色/场景阶段直接填对白）不再保留 —— 引擎编排
+     * 总是从 CHAPTER_PARSE 全量执行。single-pass 默认关闭（W07 负结果），
+     * 该恢复路径实际不可达；未来若重新启用单次模式需重新设计断点语义。
      */
     private void runMultiStepPipeline(Script script, Novel novel, List<Chapter> chapters) {
         Long scriptId = script.getId();
-        Long novelId = script.getNovelId();
 
         @SuppressWarnings("unchecked")
         List<String> focusCharacters = (List<String>) script.getWorkflowState()
                 .getOrDefault("focusCharacters", List.of());
 
-        // ── PARTIAL RECOVERY: check if characters + scenes already saved from failed single-pass ──
-        List<Character> characters = script.getCharacters();
-        List<Scene> scenes = script.getScenes();
-        boolean hasPartialResult = characters != null && !characters.isEmpty()
-                && scenes != null && !scenes.isEmpty();
+        GenerationContext ctx = new GenerationContext(scriptId, novel);
+        ctx.setChapters(chapters);
+        ctx.setAttribute("focusCharacters", focusCharacters);
 
-        if (hasPartialResult) {
-            log.info("♻️  Partial recovery: {} characters and {} scene outlines already saved from single-pass attempt",
-                    characters.size(), scenes.size());
-            log.info("   Skipping character extraction and scene segmentation → generating dialogues/actions directly");
+        AgentBundle agents = new AgentBundle(characterAgent, characterResolverAgent,
+                plotExtractionAgent, sceneAgent, dialogueAgent, actionAgent, scriptComposer);
+        Workflow wf = workflowDefinitions.fullGenerationWorkflow(ctx, agents);
 
-            // Update progress to reflect we're starting from dialogue generation
-            scriptService.updateProgress(scriptId, 60.0, WorkflowStep.DIALOGUE_GENERATE);
-        } else {
-            printModelInfo(TaskType.CHARACTER_EXTRACTION, "角色提取（回退模式）");
-            printModelInfo(TaskType.SCENE_SEGMENT, "场景切分（回退模式）");
+        log.info("🚀 Engine-driven pipeline starting: scriptId={}, steps={}",
+                scriptId, wf.getSteps().size());
+        printModelInfo(TaskType.CHARACTER_EXTRACTION, "角色提取（引擎模式）");
+        printModelInfo(TaskType.SCENE_SEGMENT, "场景切分（引擎模式）");
 
-            // Step 1: Character extraction
-            updateStep(script, WorkflowStep.CHARACTER_EXTRACT);
-            scriptService.updateProgress(scriptId, 15.0, WorkflowStep.CHARACTER_EXTRACT);
-            List<CharacterExtractionResult> extractionResults = null;
-            String charError = null;
-            try {
-                extractionResults = characterAgent.extract(chapters, focusCharacters);
-            } catch (Exception e) {
-                charError = e.getMessage();
-            }
-            if (extractionResults == null || extractionResults.isEmpty()) {
-                String msg = charError != null ? "AI 角色提取失败: " + charError : "AI 无法识别角色，请检查 API Key";
-                log.error("❌ Pipeline FAILED: {}", msg);
-                scriptService.markFailed(scriptId);
-                script.getWorkflowState().put("error", msg);
-                return;
-            }
-            scriptService.updateProgress(scriptId, 25.0, WorkflowStep.CHARACTER_EXTRACT);
+        // W14 注意点：必须用 execute()（async）而非 executeSync() ——
+        // 只有 async 分支才会并行调度 DIALOGUE 与 ACTION，串行内联会让
+        // "并行执行"名存实亡。本方法已运行在 launchGeneration 的 executor
+        // 线程上，join() 不会阻塞 HTTP 请求线程。
+        String execId = workflowEngine.execute(wf).join();
 
-            // Resolve characters
-            updateStep(script, WorkflowStep.CHARACTER_RESOLVE);
-            try {
-                characters = characterResolverAgent.resolve(extractionResults);
-            } catch (Exception e) {
-                characters = extractionResults.stream().map(CharacterExtractionResult::toDomainCharacter).toList();
-            }
-            AtomicInteger charIdSeq = new AtomicInteger((int)(scriptId * 1000));
-            for (Character c : characters) {
-                if (c.getId() == null) c.setId((long) charIdSeq.getAndIncrement());
-                c.setScriptId(scriptId);
-            }
-            scriptService.updateCharacters(scriptId, characters);
-            scriptService.updateProgress(scriptId, 35.0, WorkflowStep.CHARACTER_RESOLVE);
-
-            // Scene segmentation
-            updateStep(script, WorkflowStep.SCENE_SEGMENT);
-            scriptService.updateProgress(scriptId, 45.0, WorkflowStep.SCENE_SEGMENT);
-            String sceneError = null;
-            try {
-                scenes = sceneAgent.segment(chapters, new ArrayList<>(), characters);
-            } catch (Exception e) {
-                sceneError = e.getMessage();
-                scenes = null;
-            }
-            if (scenes == null || scenes.isEmpty()) {
-                String msg = sceneError != null ? "AI 场景切分失败: " + sceneError : "AI 无法切分场景，请检查 API Key";
-                log.error("❌ Pipeline FAILED: {}", msg);
-                scriptService.markFailed(scriptId);
-                script.getWorkflowState().put("error", msg);
-                return;
-            }
-            AtomicInteger sceneIdSeq = new AtomicInteger((int)(scriptId * 1000 + 100));
-            for (Scene s : scenes) {
-                if (s.getId() == null) s.setId((long) sceneIdSeq.getAndIncrement());
-                s.setScriptId(scriptId);
-                if (s.getDialogues() == null) s.setDialogues(new ArrayList<>());
-                if (s.getActions() == null) s.setActions(new ArrayList<>());
-            }
-            scriptService.updateScenes(scriptId, scenes);
-            scriptService.updateProgress(scriptId, 60.0, WorkflowStep.SCENE_SEGMENT);
+        // WorkflowProgress 是纯 record（无 isFailed()）；W10-defect-C 之后
+        // stepStatuses 含 FAILED 即整体失败的权威信号（引擎据此 markFailed）
+        WorkflowProgress progress = workflowEngine.getProgress(execId);
+        if (progress.stepStatuses().containsValue(StepStatus.FAILED)) {
+            log.error("❌ Pipeline FAILED (execId={}): {}", execId, progress.message());
+            script.getWorkflowState().put("error", progress.message());
+            scriptService.markFailed(scriptId);
+            return;
         }
 
-        // Dialogue generation — Tier 1: AI, Tier 2: regex extraction from source,
-        // Tier 3: explicit failure (no fabricated content — scenes stay empty)
-        updateStep(script, WorkflowStep.DIALOGUE_GENERATE);
-        scriptService.updateProgress(scriptId, 65.0, WorkflowStep.DIALOGUE_GENERATE);
-        scenes = generateDialoguesWithFallback(scriptId, scenes, characters);
-        scriptService.updateScenes(scriptId, scenes);
-        scriptService.updateProgress(scriptId, 80.0, WorkflowStep.DIALOGUE_GENERATE);
+        // ── 落库（内存 ctx → DB）──
+        List<Character> characters = ctx.getCharacters();
+        List<Scene> scenes = ctx.getScenes();
+        Script composed = ctx.getAttribute("composedScript");
 
-        // Action generation — AI only; on failure the scene is marked as pending
-        // (no fabricated content — scenes stay empty)
-        updateStep(script, WorkflowStep.ACTION_GENERATE);
-        scriptService.updateProgress(scriptId, 85.0, WorkflowStep.ACTION_GENERATE);
-        scenes = generateActionsWithFallback(scriptId, scenes, characters, scenes.stream()
-                .flatMap(s -> s.getDialogues().stream()).toList());
-        scriptService.updateScenes(scriptId, scenes);
-        scriptService.updateProgress(scriptId, 95.0, WorkflowStep.ACTION_GENERATE);
-
-        // Complete
-        String title = novel.getTitle();
-        script.setTitle(title);
-        script.setCharacters(characters);
-        script.setScenes(scenes);
-        script.setCharacterCount(characters.size());
-        script.setSceneCount(scenes.size());
-        script.setDialogueCount(scenes.stream().mapToInt(s -> s.getDialogues().size()).sum());
-        scriptService.setTitle(scriptId, title);
-        scriptService.updateScenes(scriptId, scenes);
         scriptService.updateCharacters(scriptId, characters);
+        scriptService.updateScenes(scriptId, scenes);
+
+        String title = (composed != null && composed.getTitle() != null && !composed.getTitle().isBlank())
+                ? composed.getTitle() : novel.getTitle();
+        script.setTitle(title);
+        scriptService.setTitle(scriptId, title);
 
         scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
-        scriptService.completeScript(scriptId);
-        log.info("Multi-step fallback completed: {} characters, {} scenes",
-                characters.size(), scenes.size());
+
+        // ── 终态：按 ctx 失败计数决定 COMPLETED / COMPLETED_WITH_WARNINGS ──
+        //（场景级失败在 WorkflowDefinitions 内已显式承载为 GenerationStatus.FAILED
+        //  + ctx 计数，步骤本身 COMPLETED —— 这里只做终态分流，不重算失败）
+        int failedDialogues = ctx.getFailedDialogueScenes();
+        int failedActions = ctx.getFailedActionScenes();
+        if (failedDialogues > 0 || failedActions > 0) {
+            // 失败场景 ID 供前端"待补全"定位（与旧路径 recordDialogueFailure 同语义）
+            Map<String, Object> warnings = new LinkedHashMap<>();
+            warnings.put("failedDialogueSceneIds", scenes.stream()
+                    .filter(s -> s.getDialogueStatus() == GenerationStatus.FAILED)
+                    .map(Scene::getId).toList());
+            warnings.put("failedActionSceneIds", scenes.stream()
+                    .filter(s -> s.getActionStatus() == GenerationStatus.FAILED)
+                    .map(Scene::getId).toList());
+            scriptService.recordGenerationWarnings(scriptId, warnings);
+        }
+
+        if (failedDialogues > 0 || failedActions > 0) {
+            scriptService.completeWithWarnings(scriptId, failedDialogues, failedActions);
+        } else {
+            scriptService.completeScript(scriptId);
+        }
+        log.info("✅ Engine pipeline completed (execId={}): {} characters, {} scenes, "
+                        + "failedDialogues={}, failedActions={}",
+                execId, characters.size(), scenes.size(), failedDialogues, failedActions);
     }
 
     // ── Helpers ────────────────────────────────────────────
