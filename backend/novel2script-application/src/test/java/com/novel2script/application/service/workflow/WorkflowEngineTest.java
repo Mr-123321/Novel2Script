@@ -40,7 +40,13 @@ class WorkflowEngineTest {
         stateManager = new WorkflowStateManager();
         engine = new WorkflowEngine(stateManager);
         visualizer = new WorkflowVisualizer();
-        definitions = new WorkflowDefinitions();
+        // Mermaid 测试只做可视化序列化、不执行 action，YamlExporter 传 null 安全
+        definitions = new WorkflowDefinitions(null);
+    }
+
+    /** W13: 空依赖 bundle —— 仅用于不执行 action 的定义/可视化测试。 */
+    private AgentBundle emptyBundle() {
+        return new AgentBundle(null, null, null, null, null, null, null);
     }
 
     // ==================================================================
@@ -159,7 +165,8 @@ class WorkflowEngineTest {
     @Test
     @DisplayName("Should generate valid Mermaid flowchart for a workflow")
     void shouldGenerateMermaidFlowchart() {
-        Workflow wf = definitions.fullGenerationWorkflow();
+        Workflow wf = definitions.fullGenerationWorkflow(
+                new GenerationContext(1L, null), emptyBundle());
         String mermaid = visualizer.generateMermaid(wf);
 
         assertNotNull(mermaid);
@@ -359,7 +366,8 @@ class WorkflowEngineTest {
     @Test
     @DisplayName("Should generate Mermaid for fullGenerationWorkflow")
     void shouldGenerateMermaidForFullWorkflow() {
-        Workflow wf = definitions.fullGenerationWorkflow();
+        Workflow wf = definitions.fullGenerationWorkflow(
+                new GenerationContext(1L, null), emptyBundle());
         String mermaid = visualizer.generateMermaid(wf);
 
         // Verify all nine steps are present
