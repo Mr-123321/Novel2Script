@@ -151,17 +151,34 @@ cd backend
 
 ## 1. 高层摘要（TL;DR）
 
-*   **影响范围：** 🟢 **高** - AI 驱动的小说转剧本系统，包含后端、前端、领域模型和工作流引擎
+*   **影响范围：** 🟢 **高** - AI 驱动的小说转剧本系统，包含后端（Maven 五模块）、前端、领域模型与数据库持久层
 *   **核心变更：**
     *   ✨ 新增 **Spring Boot 3.5** 后端架构，基于 **通义千问（Qwen）** 多层级 AI 模型路由
     *   ✨ 新增 **Vue 3 + TypeScript** 前端，包含剧本编辑器、实时进度追踪、YAML 预览
     *   ✨ 实现 **多步流水线**（默认路径）与 **单次 AI 调用**（v2.0 分段，配置开关控制、默认关闭）两种生成架构
     *   ✨ 新增 **SSE 实时进度推送** 和 **多格式导出**（YAML / TXT / Markdown）
-    *   ✨ 新增 **工作流引擎**（WorkflowEngine）支持并行执行、依赖解析和容错重试
+    *   ✨ 新增 **工作流引擎**（WorkflowEngine，并行执行 / 依赖解析 / 容错重试）—— 已实现并通过单测，**未接入生成主流程**（`GenerationOrchestrator` 直接编排各 Agent），见第 6 节
     *   ✨ 集成 **MyBatis-Plus + Flyway** 数据库持久化（MySQL，8 版迁移脚本）
     *   🛡️ **数据可信性加固（当前版本重点）**：拆除全部 mock / 编造层 —— 生成失败显式记录（内容置空 + 失败明细写入 workflowState），绝不伪造数据
     *   🛡️ **部分成功语义**：新增 `COMPLETED_WITH_WARNINGS` 终态，存在待补全场景时不谎报 COMPLETED、也不整体丢弃成果；SSE 推送与前端琥珀色告警横幅同步
     *   🛡️ **内容来源溯源（provenance）**：每条对白/动作记录产生路径（AI 生成 / 正则抽取 / 人工补全），场景级失败状态永久保留、不可翻转，并有守护测试固化上述不变量
+
+#### 🧹 工程治理阶段总结（已完结）
+
+本阶段目标：**清死代码、消灭文档失真**——确保 README 的每一条宣传都能在运行中的代码里找到对应，答辩时可被任意检索验证。
+
+| 工单 | 内容 | 结果 |
+|------|------|------|
+| W05（前期） | 数据可信性加固：拆除 7 个 mock 编造方法，新增 `COMPLETED_WITH_WARNINGS` 部分成功语义与 provenance 溯源 | ✅ 已合入 |
+| W06 | 删除零引用空壳 `ExportService`（`ensureExportable` 迁入 `ScriptService`），修正 README 4 处引用 | ✅ `d9d1a0d` |
+| W07 | README 与实现对齐：移除"双重生成模式/自动回退"失实宣传，新增单次 AI 调用的「负结果」分析 | ✅ `c1c5895` |
+| W08 | 长文本分块管线（processor 三件套）标注为已实现未接入的预留模块，README 新增第 6 节 | ✅ `c1e5e81` |
+| W09 | `MilvusVectorStore` → `InMemoryVectorStore` 纯改名，澄清"已部署 Milvus 集群"的命名误导 | ✅ `b76f64e` |
+
+**阶段收尾时的如实声明**：
+- 已消除的失真：虚构的"模式选择入口"、"双重生成/自动回退"宣传、`ExportService` 引用、"Milvus 已部署"暗示、无中生有的 50 万字性能宣传；
+- 仍属"已实现未接入"并已在第 6 节如实标注的模块：长文本分块管线、工作流引擎；
+- 遗留已知问题：`CharacterResolverAgentTest` 3 例姓氏称谓分组断言失败（main 既有缺陷，与治理改动无关，待后续工单处理）。
 
 ---
 
@@ -187,7 +204,7 @@ graph TB
     subgraph "应用服务层 Application Service"
         H["GenerationOrchestrator<br/>生成编排器"]
         I["ScriptGenerationAgent<br/>单次AI调用Agent"]
-        J["WorkflowEngine<br/>工作流引擎"]
+        J["WorkflowEngine<br/>工作流引擎（预留）"]
         K["ScriptService<br/>剧本/导出服务"]
         L["各 Agent<br/>Character/Dialogue/Action/Scene"]
     end
@@ -246,7 +263,6 @@ sequenceDiagram
     participant API as 🌐 API层
     participant Orchestrator as 🎼 编排器
     participant Agent as 🤖 AI Agent
-    participant Workflow as ⚙️ 工作流引擎
     participant AI as 🧠 Qwen AI
 
     User->>Frontend: 上传小说文件
@@ -259,16 +275,18 @@ sequenceDiagram
     API->>Orchestrator: launchGeneration(script)
 
     alt 多步流水线模式（默认）
-        Orchestrator->>Workflow: execute(workflow)
-        loop 每个工作流步骤
-            Workflow->>Workflow: 检查依赖
-            Workflow->>Agent: 执行步骤<br/>(角色提取/场景切分等)
+        loop 各生成阶段（解析大纲→角色→场景）
+            Orchestrator->>Agent: 执行阶段<br/>(角色提取/场景切分等)
             Agent->>AI: 调用 Qwen AI
             AI-->>Agent: 返回结果
-            Agent-->>Workflow: 步骤完成
+            Agent-->>Orchestrator: 阶段完成
         end
-        Workflow-->>Orchestrator: 所有步骤完成
-    else 单次AI调用模式（v2.0 分段）
+        par 对白与动作并行
+            Orchestrator->>Agent: 并行生成对白/动作
+            Agent-->>Orchestrator: 分支完成
+        end
+        Orchestrator-->>API: 所有阶段完成
+    else 单次AI调用模式（v2.0 分段，默认关闭）
         Orchestrator->>Agent: generateOutline(chapters)
         Agent->>AI: 一次性生成角色+场景大纲
         AI-->>Agent: 返回大纲
@@ -296,7 +314,7 @@ sequenceDiagram
 | 模块 | 职责 |
 |------|------|
 | `novel2script-api` | REST API 控制器、SSE 推送、全局异常处理 |
-| `novel2script-application` | 业务编排、AI Agent、工作流引擎、导出服务 |
+| `novel2script-application` | 业务编排、AI Agent、导出服务（工作流引擎为预留） |
 | `novel2script-domain` | 领域实体、DTO/VO、领域事件、提示词模型 |
 | `novel2script-infrastructure` | AI 模型路由、提示词注册/缓存、向量存储、配置 |
 | `novel2script-common` | 枚举、异常、常量 |
@@ -326,7 +344,7 @@ sequenceDiagram
 **关键文件：**
 - `GenerationOrchestrator.java` - 生成编排器（核心入口）
 - `ScriptGenerationAgent.java` - 单次 AI 调用 Agent（v2.0 分段模式）
-- `WorkflowEngine.java` - 工作流引擎
+- `WorkflowEngine.java` - 工作流引擎（预留，未接入主流程）
 - `WorkflowStateManager.java` - 工作流状态管理
 - `WorkflowDefinitions.java` - 工作流步骤定义
 - `ScriptService.java` / `YamlExporter` - 多格式导出（YAML/TXT/Markdown）
@@ -338,7 +356,7 @@ sequenceDiagram
 |------|------|----------|
 | **GenerationOrchestrator** | 编排整个生成流程 | 默认多步流水线；单次调用为可选路径（默认关闭，开启后失败自动回退），支持并行度配置 |
 | **ScriptGenerationAgent** | v2.0 单次 AI 调用 | 先生成角色+场景大纲，再并行填充对白/动作 |
-| **WorkflowEngine** | 工作流执行引擎 | 并行执行、依赖解析、重试机制、断点续传 |
+| **WorkflowEngine** | 工作流执行引擎（**预留，未接入主流程**，见第 6 节） | 并行执行、依赖解析、重试机制、断点续传 |
 | **SceneAgent** | 场景切分 | 并行逐章切分（MAX_PARALLEL=5），PromptCache 缓存 |
 | **ScriptService / YamlExporter** | 多格式导出 | SnakeYAML + 自定义 Representer + Schema 验证 |
 
@@ -577,7 +595,7 @@ script:
 
 ✨ **实时进度推送：** 基于 Spring Event + SSE 的实时进度推送，前端牡丹花持续动画
 
-✨ **工作流引擎：** 支持并行执行、依赖解析、重试机制、断点续传
+✨ **工作流引擎：** 支持并行执行、依赖解析、重试机制、断点续传（已实现 + 单测，未接入生成主流程，见第 6 节）
 
 ✨ **编码自动检测：** 智能检测中文文件编码（ASCII），支持双重编码修复
 
@@ -611,3 +629,15 @@ script:
 - **未来工作**：面向超长篇小说（50 万字+）启用语义检索上下文构建（分块 → 向量化 → 检索 → 组装），接入点为各分析 Agent 的任务查询构建；详细方案见论文「总结与展望」。
 
 > 注：`InMemoryVectorStore`（进程内实现，接口与 Milvus SDK 兼容）本身已在生产中使用（角色消歧 Layer 2），未接入的仅是基于它的长文本分块管线。
+
+### 6.2 工作流引擎（`service/workflow/`）
+
+| 类 | 职责 | 状态 |
+|----|------|------|
+| `WorkflowEngine` | 任务图编排：并行执行、依赖解析、容错重试 | 已实现 + 单测，未接入 |
+| `WorkflowStateManager` | 断点续传：执行状态持久化与恢复 | 已实现 + 单测，未接入 |
+| `WorkflowDefinitions` | 生成任务的工作流定义 | 已实现 + 单测，未接入 |
+
+- **当前主流程的替代方案**：`GenerationOrchestrator` 直接按固定顺序编排各 Agent（解析大纲 → 角色 → 场景 → 对白/动作并行），无通用任务图。
+- **未接入原因**：生成流水线当前是**固定拓扑**（阶段顺序不变、仅对白/动作两支并行），直接编排已足够清晰可调试；引入通用工作流引擎会增加一层抽象，收益要等出现"可配置流水线拓扑"需求时才成立。
+- **未来工作**：若需支持用户自定义生成阶段（如跳过角色生成、插入审校环节），再以 `WorkflowEngine` 替换硬编码编排。
