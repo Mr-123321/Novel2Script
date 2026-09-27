@@ -11,8 +11,7 @@ export type WorkflowStep =
   | 'DIALOGUE_GENERATE'
   | 'ACTION_GENERATE'
   | 'SCRIPT_COMPOSE'
-  | 'YAML_EXPORT'
-  | 'STORYBOARD_GENERATE';
+  | 'YAML_EXPORT';
 
 export interface PlotInsertion {
   id: number;

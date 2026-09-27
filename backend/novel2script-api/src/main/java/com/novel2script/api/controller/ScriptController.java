@@ -251,7 +251,6 @@ public class ScriptController {
                     F --> G[动作生成 ActionGen]
                     G --> H[剧本合成 ScriptCompose]
                     H --> I[YAML 导出 YamlExport]
-                    I --> J[分镜生成 Storyboard]
                 """;
 
         Map<String, String> response = new LinkedHashMap<>();

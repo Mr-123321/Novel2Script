@@ -13,8 +13,7 @@ public enum WorkflowStep {
     DIALOGUE_GENERATE   ("DialogueAgent",             6,  true),
     ACTION_GENERATE     ("ActionAgent",               7,  true),
     SCRIPT_COMPOSE      ("ScriptComposerAgent",       8,  false),
-    YAML_EXPORT         ("YamlExporter",              9,  false),
-    STORYBOARD_GENERATE ("StoryboardAgent",          10,  true);
+    YAML_EXPORT         ("YamlExporter",              9,  false);
 
     private final String agentName;
     private final int order;
@@ -53,6 +52,6 @@ public enum WorkflowStep {
     }
 
     public boolean isLast() {
-        return this == STORYBOARD_GENERATE;
+        return this == YAML_EXPORT;
     }
 }

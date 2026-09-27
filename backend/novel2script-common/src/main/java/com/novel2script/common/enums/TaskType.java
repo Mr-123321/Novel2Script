@@ -8,7 +8,7 @@ package com.novel2script.common.enums;
  *   <li><b>qwen-turbo</b> — fast/cheap: character extraction, scene segmentation,
  *       action generation, chapter parsing, YAML export</li>
  *   <li><b>qwen-plus</b> — balanced: dialogue generation, character resolution,
- *       plot extraction, script composition, storyboard generation</li>
+ *       plot extraction, script composition</li>
  *   <li><b>qwen-max</b> — most powerful (available for manual override on any task)</li>
  * </ul>
  *
@@ -28,8 +28,7 @@ public enum TaskType {
     SCRIPT_COMPOSE("qwen-plus"),
     CHARACTER_RESOLVE("qwen-plus"),
     PLOT_EXTRACTION("qwen-plus"),
-    DIALOGUE_GENERATE("qwen-plus"),
-    STORYBOARD_GENERATE("qwen-plus");
+    DIALOGUE_GENERATE("qwen-plus");
 
     private final String defaultProvider;
 
@@ -57,7 +56,6 @@ public enum TaskType {
             case ACTION_GENERATE -> ACTION_GENERATE;
             case SCRIPT_COMPOSE -> SCRIPT_COMPOSE;
             case YAML_EXPORT -> YAML_EXPORT;
-            case STORYBOARD_GENERATE -> STORYBOARD_GENERATE;
         };
     }
 }

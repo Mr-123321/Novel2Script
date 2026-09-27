@@ -166,7 +166,7 @@ class WorkflowEngineTest {
         assertTrue(mermaid.contains("```mermaid"), "Should contain mermaid fence");
         assertTrue(mermaid.contains("flowchart TD"), "Should be top-down flowchart");
         assertTrue(mermaid.contains("CHAPTER_PARSE"), "Should include CHAPTER_PARSE node");
-        assertTrue(mermaid.contains("STORYBOARD_GENERATE"), "Should include STORYBOARD_GENERATE node");
+        assertTrue(mermaid.contains("YAML_EXPORT"), "Should include YAML_EXPORT terminal node");
         assertTrue(mermaid.contains("-->"), "Should contain dependency arrows");
     }
 
@@ -362,7 +362,7 @@ class WorkflowEngineTest {
         Workflow wf = definitions.fullGenerationWorkflow();
         String mermaid = visualizer.generateMermaid(wf);
 
-        // Verify all ten steps are present
+        // Verify all nine steps are present
         for (WorkflowStep ws : WorkflowStep.values()) {
             assertTrue(mermaid.contains(ws.name()),
                     "Mermaid should contain node for " + ws.name());
@@ -371,7 +371,7 @@ class WorkflowEngineTest {
         // Verify key dependency relationships
         assertTrue(mermaid.contains("CHAPTER_PARSE"), "Missing root node");
         assertTrue(mermaid.contains("SCRIPT_COMPOSE"), "Missing compose node");
-        assertTrue(mermaid.contains("STORYBOARD_GENERATE"), "Missing terminal node");
+        assertTrue(mermaid.contains("YAML_EXPORT"), "Missing terminal node");
 
         System.out.println("Mermaid flowchart:\n" + mermaid);
     }

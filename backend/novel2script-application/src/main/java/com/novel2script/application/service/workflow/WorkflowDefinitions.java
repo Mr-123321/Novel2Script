@@ -19,7 +19,7 @@ import java.util.List;
 public class WorkflowDefinitions {
 
     /**
-     * The full 10-step script-generation workflow with all dependencies.
+     * The full 9-step script-generation workflow with all dependencies.
      *
      * <pre>
      *   CHAPTER_PARSE
@@ -30,13 +30,16 @@ public class WorkflowDefinitions {
      *    │         ├── DIALOGUE_GENERATE
      *    │         └── ACTION_GENERATE
      *    ├── SCRIPT_COMPOSE   (waits for all parallel branches)
-     *    └── YAML_EXPORT → STORYBOARD_GENERATE
+     *    └── YAML_EXPORT
      * </pre>
+     * <p>
+     * W11: 原第 10 步 STORYBOARD_GENERATE 已移除 —— StoryboardAgent 从未实现，
+     * 分镜数据结构（Storyboard / StoryboardDef）保留为 YAML schema 的可选导出特性。
      */
     public Workflow fullGenerationWorkflow() {
         return Workflow.builder()
                 .name("fullGeneration")
-                .description("Full pipeline: novel → parsed chapters → characters → plot → scenes → dialogue/action → composed script → YAML export → storyboard")
+                .description("Full pipeline: novel → parsed chapters → characters → plot → scenes → dialogue/action → composed script → YAML export")
                 .steps(List.of(
                         step(WF.CHAPTER_PARSE),
 
@@ -51,8 +54,7 @@ public class WorkflowDefinitions {
 
                         step(WF.SCRIPT_COMPOSE, WF.CHARACTER_RESOLVE, WF.DIALOGUE_GENERATE, WF.ACTION_GENERATE),
 
-                        step(WF.YAML_EXPORT, WF.SCRIPT_COMPOSE),
-                        step(WF.STORYBOARD_GENERATE, WF.YAML_EXPORT)
+                        step(WF.YAML_EXPORT, WF.SCRIPT_COMPOSE)
                 ))
                 .build();
     }
@@ -72,7 +74,6 @@ public class WorkflowDefinitions {
         static final WorkflowStep ACTION_GENERATE     = WorkflowStep.ACTION_GENERATE;
         static final WorkflowStep SCRIPT_COMPOSE      = WorkflowStep.SCRIPT_COMPOSE;
         static final WorkflowStep YAML_EXPORT         = WorkflowStep.YAML_EXPORT;
-        static final WorkflowStep STORYBOARD_GENERATE = WorkflowStep.STORYBOARD_GENERATE;
     }
 
     private static Step step(WorkflowStep type) {

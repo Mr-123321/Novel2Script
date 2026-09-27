@@ -24,7 +24,6 @@ export function stepLabel(step: string): string {
     ACTION_GENERATE: '动作生成',
     SCRIPT_COMPOSE: '剧本合成',
     YAML_EXPORT: 'YAML 导出',
-    STORYBOARD_GENERATE: '分镜生成',
   };
   return labels[step] ?? step;
 }
