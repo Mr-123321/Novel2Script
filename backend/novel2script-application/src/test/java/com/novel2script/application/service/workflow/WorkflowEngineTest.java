@@ -286,7 +286,54 @@ class WorkflowEngineTest {
     }
 
     // ==================================================================
-    // 7. Status text
+    // 7. W10 acceptance — full-chain execution & overall failure state
+    // ==================================================================
+
+    @Test
+    @DisplayName("W10-A: 全链路工作流的每一步都必须被执行（修复前只跑第 1 步）")
+    void shouldExecuteEveryStepOfChainedWorkflow() {
+        List<String> log = Collections.synchronizedList(new ArrayList<>());
+        Workflow wf = buildSimpleWorkflow("fullChain", log, false, -1);
+
+        String execId = engine.executeSync(wf);
+
+        int expected = WorkflowStep.values().length;
+        assertEquals(expected, log.size(),
+                "All " + expected + " steps must execute, got: " + log);
+
+        Map<WorkflowStep, StepStatus> state = engine.getState(execId);
+        for (WorkflowStep ws : WorkflowStep.values()) {
+            assertEquals(StepStatus.COMPLETED, state.get(ws),
+                    ws + " must be COMPLETED after full run");
+        }
+        assertEquals(100.0, engine.getProgress(execId).overallProgress(), 0.01);
+    }
+
+    @Test
+    @DisplayName("W10-C: 步骤重试耗尽后整体状态必须为 FAILED，不得谎报成功")
+    void shouldMarkOverallFailedWhenStepFails() {
+        List<String> log = Collections.synchronizedList(new ArrayList<>());
+        // failAtIndex=1 → CHARACTER_EXTRACT（retryable=true → onFailure=RETRY, maxRetries=2）
+        Workflow wf = buildSimpleWorkflow("failChain", log, true, 1);
+
+        String execId = engine.executeSync(wf);
+
+        Map<WorkflowStep, StepStatus> state = engine.getState(execId);
+        assertEquals(StepStatus.FAILED, state.get(WorkflowStep.CHARACTER_EXTRACT),
+                "Exhausted step must stay FAILED (onFailure=RETRY)");
+        assertEquals(StepStatus.COMPLETED, state.get(WorkflowStep.CHAPTER_PARSE));
+
+        WorkflowProgress progress = engine.getProgress(execId);
+        assertTrue(progress.message().toLowerCase().contains("failed"),
+                "Overall message must report failure, got: " + progress.message());
+        assertNotEquals(100.0, progress.overallProgress(),
+                "Failed workflow must not report 100% progress");
+        assertEquals(StepStatus.PENDING, state.get(WorkflowStep.PLOT_EXTRACT),
+                "Downstream of a failed step must not execute");
+    }
+
+    // ==================================================================
+    // 8. Status text
     // ==================================================================
 
     @Test

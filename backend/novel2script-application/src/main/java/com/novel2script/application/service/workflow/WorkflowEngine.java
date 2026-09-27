@@ -9,11 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -57,7 +57,8 @@ public class WorkflowEngine {
                 return t;
             }
         };
-        this.executor = Executors.newCachedThreadPool(tf);
+        // W10: 有界线程池，避免 AI 高并发时线程数爆炸（cachedThreadPool 无上界）
+        this.executor = Executors.newFixedThreadPool(8, tf);
     }
 
     // ==================================================================
@@ -179,7 +180,8 @@ public class WorkflowEngine {
 
     private void runLoopInternal(String executionId, Workflow workflow, boolean async) {
         int totalSteps = workflow.getSteps().size();
-        Map<WorkflowStep, StepStatus> statusMap = new EnumMap<>(WorkflowStep.class);
+        // W10-defect-B: 并行分支多线程同时 put，必须用线程安全 Map（原 EnumMap 会丢更新/卡死）
+        Map<WorkflowStep, StepStatus> statusMap = new ConcurrentHashMap<>();
 
         while (true) {
             // Phase 1 — find runnable steps
@@ -221,15 +223,29 @@ public class WorkflowEngine {
                 }
             }
 
-            // Check if all steps are done (COMPLETED or SKIPPED)
-            boolean allDone = statusMap.values().stream()
-                    .allMatch(s -> s == StepStatus.COMPLETED || s == StepStatus.SKIPPED);
+            // W10-defect-A: 不能只看 statusMap 里已调度的步骤（第一轮只有 1 个元素，
+            // 单元素 allMatch 恒为 true 会导致 10 步工作流只跑第 1 步就报成功）。
+            // 必须遍历工作流定义的全部步骤逐个判定（对 resume 同样成立——
+            // resume 拿到的 map 恒含全部枚举值，size 判定不可用）。
+            boolean allDone = workflow.getSteps().stream()
+                    .allMatch(s -> {
+                        StepStatus st = statusMap.getOrDefault(s.getStepType(), StepStatus.PENDING);
+                        return st == StepStatus.COMPLETED || st == StepStatus.SKIPPED;
+                    });
             if (allDone) {
                 break;
             }
         }
 
-        stateManager.markCompleted(executionId);
+        // W10-defect-C: 存在 FAILED 步骤时不得标记整体成功
+        //（失败重试耗尽 → 下游被跳过/不再调度 → 循环退出，原实现无条件 markCompleted，
+        //  导致 AI 全挂时剧本仍显示"生成成功"）
+        boolean anyFailed = statusMap.values().stream().anyMatch(s -> s == StepStatus.FAILED);
+        if (anyFailed) {
+            stateManager.markFailed(executionId, "One or more steps failed");
+        } else {
+            stateManager.markCompleted(executionId);
+        }
     }
 
     /**
@@ -263,14 +279,24 @@ public class WorkflowEngine {
                 return;
             }
 
-            boolean allDone = statusMap.values().stream()
-                    .allMatch(s -> s == StepStatus.COMPLETED || s == StepStatus.SKIPPED);
+            // W10-defect-A: 见 runLoopInternal 内注释 —— 必须遍历工作流定义的全部步骤
+            boolean allDone = workflow.getSteps().stream()
+                    .allMatch(s -> {
+                        StepStatus st = statusMap.getOrDefault(s.getStepType(), StepStatus.PENDING);
+                        return st == StepStatus.COMPLETED || st == StepStatus.SKIPPED;
+                    });
             if (allDone) {
                 break;
             }
         }
 
-        stateManager.markCompleted(executionId);
+        // W10-defect-C: 见 runLoopInternal 内注释
+        boolean anyFailed = statusMap.values().stream().anyMatch(s -> s == StepStatus.FAILED);
+        if (anyFailed) {
+            stateManager.markFailed(executionId, "One or more steps failed");
+        } else {
+            stateManager.markCompleted(executionId);
+        }
     }
 
     // ==================================================================
