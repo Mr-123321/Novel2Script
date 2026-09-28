@@ -346,7 +346,8 @@ public class GenerationOrchestrator {
         script.setTitle(title);
         scriptService.setTitle(scriptId, title);
 
-        scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
+        // 进度 100% 已由 YAML_EXPORT 步骤末尾推送（W15），此处不再重复——
+        // 重复推送会把 workflowState.currentStep 回跳成 SCRIPT_COMPOSE
 
         // ── 终态：按 ctx 失败计数决定 COMPLETED / COMPLETED_WITH_WARNINGS ──
         //（场景级失败在 WorkflowDefinitions 内已显式承载为 GenerationStatus.FAILED

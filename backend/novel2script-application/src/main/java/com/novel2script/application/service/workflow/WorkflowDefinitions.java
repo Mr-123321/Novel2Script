@@ -3,6 +3,7 @@ package com.novel2script.application.service.workflow;
 import com.novel2script.application.service.agent.model.CharacterExtractionResult;
 import com.novel2script.application.service.agent.model.CompositionInput;
 import com.novel2script.application.service.exporter.YamlExporter;
+import com.novel2script.application.service.ScriptService;
 import com.novel2script.application.service.workflow.model.Step;
 import com.novel2script.application.service.workflow.model.Workflow;
 import com.novel2script.common.enums.ContentSource;
@@ -43,8 +44,10 @@ import java.util.stream.Stream;
  * {@link AgentBundle} 打包注入（方法参数，<b>绝不存为字段</b> ——
  * 本类是 Spring 单例，存 ctx 会导致多剧本并发串数据）。
  * <p>
- * <b>NOTE(接入中，W13)</b>: 本类定义的工作流仍未被
- * {@code GenerationOrchestrator}（主链路）调用；接入方案见论文「总结与展望」。
+ * <b>NOTE(已接入，W14/W15)</b>: 本类定义的工作流自 W14 起由
+ * {@code GenerationOrchestrator#runMultiStepPipeline} 在主链路调用；
+ * W15 起各步骤完成时经 {@code ScriptService.updateProgress} 推送主链路进度
+ * （→ {@code ScriptProgressChangedEvent} → SSE）。
  *
  * <h3>异常约定（工单注意点 3）</h3>
  * 不吞异常 —— {@code Step.action} 抛异常才会触发引擎重试，catch 后返回空集合
@@ -68,8 +71,16 @@ public class WorkflowDefinitions {
 
     private final YamlExporter yamlExporter;
 
-    public WorkflowDefinitions(YamlExporter yamlExporter) {
+    /**
+     * W15: 主链路进度推送出口（Script.progress + workflowState.currentStep 落库，
+     * 并发布 ScriptProgressChangedEvent → SSE）。无循环依赖：
+     * ScriptService → {@code @Lazy} Orchestrator → 本类，唯一的回边已被 @Lazy 打断。
+     */
+    private final ScriptService scriptService;
+
+    public WorkflowDefinitions(YamlExporter yamlExporter, ScriptService scriptService) {
         this.yamlExporter = yamlExporter;
+        this.scriptService = scriptService;
     }
 
     /**
@@ -144,6 +155,7 @@ public class WorkflowDefinitions {
         }
         ctx.setChapters(chapters);
         log.info("[workflow] CHAPTER_PARSE: {} chapters from '{}'", chapters.size(), novel.getTitle());
+        reportProgress(ctx, WorkflowStep.CHAPTER_PARSE, 15);
     }
 
     /** CHARACTER_EXTRACT: AI 角色提取。空结果抛异常触发重试。 */
@@ -157,6 +169,7 @@ public class WorkflowDefinitions {
         }
         ctx.setRawCharacters(results);
         log.info("[workflow] CHARACTER_EXTRACT: {} raw characters", results.size());
+        reportProgress(ctx, WorkflowStep.CHARACTER_EXTRACT, 25);
     }
 
     /** CHARACTER_RESOLVE: 角色消歧；失败降级用原始提取结果（与主链路一致，不编造）。 */
@@ -180,6 +193,7 @@ public class WorkflowDefinitions {
         }
         ctx.setCharacters(characters);
         log.info("[workflow] CHARACTER_RESOLVE: {} characters", characters.size());
+        reportProgress(ctx, WorkflowStep.CHARACTER_RESOLVE, 35);
     }
 
     /** PLOT_EXTRACT: 情节提取（辅助上下文，允许为空但异常会触发重试）。 */
@@ -188,6 +202,7 @@ public class WorkflowDefinitions {
                 .extract(ctx.getChapters(), ctx.getCharacters());
         ctx.setPlotEvents(events);
         log.info("[workflow] PLOT_EXTRACT: {} plot events", ctx.getPlotEvents().size());
+        reportProgress(ctx, WorkflowStep.PLOT_EXTRACT, 45);
     }
 
     /** SCENE_SEGMENT: 场景切分 + ID 分配 + 初始化对白/动作空列表。 */
@@ -207,6 +222,7 @@ public class WorkflowDefinitions {
         }
         ctx.setScenes(scenes);
         log.info("[workflow] SCENE_SEGMENT: {} scenes", scenes.size());
+        reportProgress(ctx, WorkflowStep.SCENE_SEGMENT, 55);
     }
 
     /**
@@ -232,6 +248,7 @@ public class WorkflowDefinitions {
                 ctx.incrementFailedDialogueScenes();
             }
             log.warn("[workflow] 无角色可用于对白归因，{} 个场景显式标记失败", scenes.size());
+            reportProgress(ctx, WorkflowStep.DIALOGUE_GENERATE, 70);
             return;
         }
 
@@ -287,6 +304,7 @@ public class WorkflowDefinitions {
         if (failed > 0) {
             log.warn("[workflow] 对白生成：{} 个场景无对白（AI 与原文抽取均失败）——不编造，待人工补全", failed);
         }
+        reportProgress(ctx, WorkflowStep.DIALOGUE_GENERATE, 70);
     }
 
     /**
@@ -307,6 +325,7 @@ public class WorkflowDefinitions {
                 ctx.incrementFailedActionScenes();
             }
             log.warn("[workflow] 无角色可用于动作归因，{} 个场景显式标记失败", scenes.size());
+            reportProgress(ctx, WorkflowStep.ACTION_GENERATE, 80);
             return;
         }
 
@@ -339,6 +358,7 @@ public class WorkflowDefinitions {
                 log.warn("[workflow] 动作生成失败，场景 '{}' 标记为待补全（不编造动作）", scene.getTitle());
             }
         }
+        reportProgress(ctx, WorkflowStep.ACTION_GENERATE, 80);
     }
 
     /** SCRIPT_COMPOSE: 聚合全部产出合成剧本，结果挂到 ctx attributes。 */
@@ -364,6 +384,7 @@ public class WorkflowDefinitions {
         ctx.setAttribute("composedScript", composed);
         log.info("[workflow] SCRIPT_COMPOSE: '{}' ({} scenes)", composed.getTitle(),
                 composed.getScenes() != null ? composed.getScenes().size() : 0);
+        reportProgress(ctx, WorkflowStep.SCRIPT_COMPOSE, 92);
     }
 
     /** YAML_EXPORT: 导出合成剧本为 YAML，挂到 ctx attributes。 */
@@ -375,11 +396,52 @@ public class WorkflowDefinitions {
         String yaml = yamlExporter.exportToString(composed);
         ctx.setAttribute("yamlContent", yaml);
         log.info("[workflow] YAML_EXPORT: {} chars", yaml.length());
+        reportProgress(ctx, WorkflowStep.YAML_EXPORT, 100);
     }
 
     // ═══════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════
+
+    /** Per-execution monotonic progress guard (stored in ctx attributes). */
+    private static final String MAX_PROGRESS_KEY = "maxProgressPct";
+
+    /**
+     * W15: 推送主链路进度 —— 步骤完成时按固定百分比写入 Script.progress 与
+     * workflowState.currentStep，并经 {@code ScriptProgressChangedEvent} → SSE
+     * 到前端进度条。
+     *
+     * <p>⚠️ 并行分支（CHARACTER_EXTRACT↔PLOT_EXTRACT、DIALOGUE_GENERATE↔
+     * ACTION_GENERATE）完成顺序不定，进度只允许<b>单调不减</b>：
+     * 低百分比的迟到推送被丢弃，否则前端进度条会回跳。
+     * <p>异常不外抛 —— 进度推送是旁路，失败不阻断生成主流程。
+     */
+    private void reportProgress(GenerationContext ctx, WorkflowStep step, double pct) {
+        Long scriptId = ctx.getScriptId();
+        if (scriptId == null || scriptService == null) return;
+        try {
+            AtomicInteger max;
+            synchronized (ctx) {
+                max = ctx.getAttribute(MAX_PROGRESS_KEY);
+                if (max == null) {
+                    max = new AtomicInteger(0);
+                    ctx.setAttribute(MAX_PROGRESS_KEY, max);
+                }
+            }
+            int prev;
+            do {
+                prev = max.get();
+                if ((int) pct <= prev) {
+                    log.debug("[workflow] 丢弃回跳进度 {}% ({}), 当前已达 {}%", pct, step, prev);
+                    return;
+                }
+            } while (!max.compareAndSet(prev, (int) pct));
+            scriptService.updateProgress(scriptId, pct, step);
+            log.info("[workflow] 主链路进度: {} → {}%", step.getAgentName(), pct);
+        } catch (Exception e) {
+            log.warn("[workflow] 进度推送失败（不阻断生成）: {}", e.getMessage());
+        }
+    }
 
     private static List<Dialogue> flattenDialogues(List<Scene> scenes) {
         if (scenes == null) return List.of();

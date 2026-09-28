@@ -9,11 +9,13 @@ import com.novel2script.common.enums.ScriptStatus;
 import com.novel2script.common.enums.TimeOfDay;
 import com.novel2script.common.enums.WorkflowStep;
 import com.novel2script.common.exception.BusinessException;
+import com.novel2script.domain.event.ScriptProgressChangedEvent;
 import com.novel2script.domain.model.*;
 import com.novel2script.domain.model.Character;  // explicit — resolves ambiguity with java.lang.Character
 import com.novel2script.infrastructure.mapper.*;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,8 @@ public class ScriptService {
     private final PlotEventMapper plotEventMapper;
     private final PlotInsertionMapper plotInsertionMapper;
     private final GenerationOrchestrator orchestrator;
+    /** W15: 进度/终态变化事件发布（→ SseProgressListener → SSE）。 */
+    private final ApplicationEventPublisher eventPublisher;
 
     public ScriptService(ScriptMapper scriptMapper,
                          CharacterMapper characterMapper,
@@ -50,7 +54,8 @@ public class ScriptService {
                          ActionMapper actionMapper,
                          PlotEventMapper plotEventMapper,
                          PlotInsertionMapper plotInsertionMapper,
-                         @Lazy GenerationOrchestrator orchestrator) {
+                         @Lazy GenerationOrchestrator orchestrator,
+                         ApplicationEventPublisher eventPublisher) {
         this.scriptMapper = scriptMapper;
         this.characterMapper = characterMapper;
         this.sceneMapper = sceneMapper;
@@ -59,6 +64,7 @@ public class ScriptService {
         this.plotEventMapper = plotEventMapper;
         this.plotInsertionMapper = plotInsertionMapper;
         this.orchestrator = orchestrator;
+        this.eventPublisher = eventPublisher;
     }
 
     // ─────────────────────────────────────────────────────
@@ -220,6 +226,9 @@ public class ScriptService {
         script.getWorkflowState().put("currentStep", step.name());
         script.setUpdatedAt(LocalDateTime.now());
         scriptMapper.updateById(script);
+        // W15: 修复断裂的 SSE 链 —— 事件此前从未被发布，监听器（SseProgressListener）
+        // 形同虚设，前端收不到任何 progress/complete/error 事件
+        publishProgressEvent(scriptId);
     }
 
     /**
@@ -434,6 +443,8 @@ public class ScriptService {
         script.setYamlContent(generateYaml(fullScript));
         script.setUpdatedAt(LocalDateTime.now());
         scriptMapper.updateById(script);
+        // W15: 终态事件 → SSE "complete"（COMPLETED / COMPLETED_WITH_WARNINGS）
+        publishProgressEvent(script.getId());
         log.info("Script finished: id={}, status={}, failedDialogues={}, failedActions={}, title='{}', scenes={}, characters={}",
                 script.getId(), script.getStatus(), failedDialogueScenes, failedActionScenes,
                 script.getTitle(), script.getSceneCount(), script.getCharacterCount());
@@ -458,7 +469,22 @@ public class ScriptService {
         script.setStatus(ScriptStatus.FAILED);
         script.setUpdatedAt(LocalDateTime.now());
         scriptMapper.updateById(script);
+        // W15: 终态事件 → SSE "error"
+        publishProgressEvent(scriptId);
         log.warn("Script marked FAILED: id={}", scriptId);
+    }
+
+    /**
+     * W15: 发布 {@link ScriptProgressChangedEvent}（→ SseProgressListener → SSE）。
+     * 发布失败只记日志，绝不阻断生成主流程（进度推送是旁路，不是关键路径）。
+     */
+    private void publishProgressEvent(Long scriptId) {
+        if (eventPublisher == null || scriptId == null) return;
+        try {
+            eventPublisher.publishEvent(new ScriptProgressChangedEvent(scriptId));
+        } catch (Exception e) {
+            log.debug("Could not publish progress event for script {}: {}", scriptId, e.getMessage());
+        }
     }
 
     @Transactional

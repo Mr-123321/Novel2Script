@@ -41,7 +41,7 @@ class WorkflowEngineTest {
         engine = new WorkflowEngine(stateManager);
         visualizer = new WorkflowVisualizer();
         // Mermaid 测试只做可视化序列化、不执行 action，YamlExporter 传 null 安全
-        definitions = new WorkflowDefinitions(null);
+        definitions = new WorkflowDefinitions(null, null);
     }
 
     /** W13: 空依赖 bundle —— 仅用于不执行 action 的定义/可视化测试。 */

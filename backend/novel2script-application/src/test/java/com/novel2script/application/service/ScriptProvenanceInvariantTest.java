@@ -65,7 +65,7 @@ class ScriptProvenanceInvariantTest {
     @BeforeEach
     void setUp() {
         scriptService = new ScriptService(scriptMapper, characterMapper, sceneMapper,
-                dialogueMapper, actionMapper, plotEventMapper, plotInsertionMapper, orchestrator);
+                dialogueMapper, actionMapper, plotEventMapper, plotInsertionMapper, orchestrator, null);
 
         failedScene = Scene.builder()
                 .id(SCENE_ID)

@@ -98,7 +98,7 @@ class ScriptStatusWarningsTest {
 
         /** ensureExportable only inspects the passed script — deps are unused here. */
         private final ScriptService scriptService =
-                new ScriptService(null, null, null, null, null, null, null, null);
+                new ScriptService(null, null, null, null, null, null, null, null, null);
 
         @Test
         @DisplayName("COMPLETED_WITH_WARNINGS 允许导出")
