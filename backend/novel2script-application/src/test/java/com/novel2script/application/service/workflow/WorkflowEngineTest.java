@@ -335,8 +335,10 @@ class WorkflowEngineTest {
                 "Overall message must report failure, got: " + progress.message());
         assertNotEquals(100.0, progress.overallProgress(),
                 "Failed workflow must not report 100% progress");
-        assertEquals(StepStatus.PENDING, state.get(WorkflowStep.PLOT_EXTRACT),
-                "Downstream of a failed step must not execute");
+        // W16 起失败下游显式传播为 SKIPPED（不再冻结在 PENDING），
+        // 两种状态都保证"该步骤未被执行"
+        assertEquals(StepStatus.SKIPPED, state.get(WorkflowStep.PLOT_EXTRACT),
+                "Downstream of a failed step must be SKIPPED, never executed");
     }
 
     // ==================================================================

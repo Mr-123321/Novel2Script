@@ -8,7 +8,11 @@ import com.novel2script.common.enums.WorkflowStep;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -205,6 +209,10 @@ public class WorkflowEngine {
                 }
             }
 
+            // W16: 失败传播 —— FAILED 步骤的全部传递依赖方显式置为 SKIPPED，
+            // 而不是永远冻结在 PENDING（可视化 / 排查时"未执行"与"因上游失败被跳过"是两种事实）
+            propagateSkipToDependents(executionId, workflow, statusMap);
+
             // Phase 3 — update progress
             long done = statusMap.values().stream()
                     .filter(s -> s == StepStatus.COMPLETED || s == StepStatus.SKIPPED)
@@ -266,6 +274,9 @@ public class WorkflowEngine {
                     .collect(Collectors.toList());
 
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            // W16: 失败传播（语义同 runLoopInternal）
+            propagateSkipToDependents(executionId, workflow, statusMap);
 
             long done = statusMap.values().stream()
                     .filter(s -> s == StepStatus.COMPLETED || s == StepStatus.SKIPPED)
@@ -358,6 +369,62 @@ public class WorkflowEngine {
                     stateManager.markStepFailed(executionId, type, "Interrupted during retry");
                     statusMap.put(type, StepStatus.FAILED);
                     return;
+                }
+            }
+        }
+    }
+
+    // ==================================================================
+    // Failure propagation
+    // ==================================================================
+
+    /**
+     * W16: 失败下游传播 —— 某步骤重试耗尽 FAILED 后，其全部（传递）依赖方
+     * 显式标记为 SKIPPED，而非永远停留在 PENDING。
+     *
+     * <p>背景：{@link #executeStep} 内虽含"依赖失败 → 跳过"分支，但
+     * {@link #findRunnableSteps} 只把依赖为 COMPLETED/SKIPPED 的步骤投入调度
+     * —— 依赖为 FAILED 的下游根本不会被调度，该分支因此永远不可达，
+     * 失败下游会冻结在 PENDING。本方法在每轮调度结束后沿依赖图做 BFS，
+     * 将 FAILED 节点的传递依赖方（仅 PENDING 状态，不覆盖 RUNNING/终态）
+     * 置为 SKIPPED 并推送状态事件。整体 FAILED 的判定不变（W10-defect-C）。
+     */
+    private void propagateSkipToDependents(String executionId, Workflow workflow,
+                                           Map<WorkflowStep, StepStatus> statusMap) {
+        boolean anyFailed = statusMap.values().stream().anyMatch(s -> s == StepStatus.FAILED);
+        if (!anyFailed) {
+            return;
+        }
+
+        // 反向依赖图：dep → 依赖它的步骤列表
+        Map<WorkflowStep, List<WorkflowStep>> dependents = new HashMap<>();
+        for (Step step : workflow.getSteps()) {
+            for (WorkflowStep dep : step.getDependsOn()) {
+                dependents.computeIfAbsent(dep, k -> new ArrayList<>()).add(step.getStepType());
+            }
+        }
+
+        // 从全部 FAILED 节点出发 BFS，只把 PENDING 的传递依赖方降级为 SKIPPED
+        Deque<WorkflowStep> queue = new ArrayDeque<>();
+        Set<WorkflowStep> visited = EnumSet.noneOf(WorkflowStep.class);
+        for (Map.Entry<WorkflowStep, StepStatus> e : statusMap.entrySet()) {
+            if (e.getValue() == StepStatus.FAILED) {
+                queue.add(e.getKey());
+                visited.add(e.getKey());
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            WorkflowStep failed = queue.poll();
+            for (WorkflowStep next : dependents.getOrDefault(failed, List.of())) {
+                if (!visited.add(next)) {
+                    continue;
+                }
+                if (statusMap.getOrDefault(next, StepStatus.PENDING) == StepStatus.PENDING) {
+                    statusMap.put(next, StepStatus.SKIPPED);
+                    stateManager.markStepSkipped(executionId, next,
+                            "上游依赖 " + failed.getAgentName() + " 失败，跳过执行");
+                    queue.add(next);
                 }
             }
         }
