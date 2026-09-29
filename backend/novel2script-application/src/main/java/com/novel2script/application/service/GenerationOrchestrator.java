@@ -187,7 +187,10 @@ public class GenerationOrchestrator {
                         script.setPlotEvents(new ArrayList<>());
 
                         // ── IMMEDIATE SAVE: preserve outline even if dialogue fill fails ──
-                        scriptService.updateCharacters(scriptId, outline.getCharacters());
+                        Map<Long, Long> outlineIdRemap =
+                                scriptService.updateCharacters(scriptId, outline.getCharacters());
+                        remapCharacterReferences(outlineScenes, outlineIdRemap,
+                                validCharacterIds(outline.getCharacters()));
                         scriptService.updateScenes(scriptId, outlineScenes);
                         scriptService.updateProgress(scriptId, 55.0, WorkflowStep.SCRIPT_COMPOSE);
 
@@ -239,7 +242,10 @@ public class GenerationOrchestrator {
                         script.setPlotEvents(new ArrayList<>());
                         script.setVersion(1);
 
-                        scriptService.updateCharacters(scriptId, generated.getCharacters());
+                        Map<Long, Long> generatedIdRemap =
+                                scriptService.updateCharacters(scriptId, generated.getCharacters());
+                        remapCharacterReferences(generated.getScenes(), generatedIdRemap,
+                                validCharacterIds(generated.getCharacters()));
                         scriptService.updateScenes(scriptId, generated.getScenes());
                         scriptService.updateProgress(scriptId, 100.0, WorkflowStep.SCRIPT_COMPOSE);
                         scriptService.completeScript(scriptId);
@@ -347,7 +353,11 @@ public class GenerationOrchestrator {
         List<Scene> scenes = ctx.getScenes();
         Script composed = ctx.getAttribute("composedScript");
 
-        scriptService.updateCharacters(scriptId, characters);
+        // W18: updateCharacters 删旧插新会签发新自增 ID，而引擎阶段生成的
+        // 对白/动作 characterId 还是落库前的旧 ID —— 必须先重映射再落库，
+        // 否则 fk_dialogues_character 外键违约（Cannot add or update a child row）
+        Map<Long, Long> idRemap = scriptService.updateCharacters(scriptId, characters);
+        remapCharacterReferences(scenes, idRemap, validCharacterIds(characters));
         scriptService.updateScenes(scriptId, scenes);
 
         String title = (composed != null && composed.getTitle() != null && !composed.getTitle().isBlank())
@@ -386,6 +396,62 @@ public class GenerationOrchestrator {
     }
 
     // ── Helpers ────────────────────────────────────────────
+
+    /**
+     * W18: 引擎编排下，对白/动作的 {@code characterId} 在工作流内存阶段就已定值，
+     * 而 {@link ScriptService#updateCharacters} 采用「删旧插新」策略会签发新的
+     * 自增 ID —— 不重映射直接落库会触发 {@code fk_dialogues_character} 外键违约。
+     *
+     * <p>按 old→new 映射对内存引用做<b>单遍</b>重映射（单遍 getOrDefault 不会产生
+     * 映射链误替换）；重映射后仍不在合法 ID 集合内的值置 null（列可空，
+     * FK 为 ON DELETE SET NULL 语义）并 warn 记录 —— 说话人名字仍保留，
+     * 归属丢失如实降级，不编造。
+     *
+     * @param idMap updateCharacters 返回的 old→new 映射，允许为 null（单测 mock）
+     */
+    private static void remapCharacterReferences(List<Scene> scenes,
+                                                 Map<Long, Long> idMap,
+                                                 Set<Long> validIds) {
+        if (scenes == null) return;
+        boolean hasRemap = idMap != null && !idMap.isEmpty();
+        for (Scene scene : scenes) {
+            if (hasRemap && scene.getCharacterIds() != null && !scene.getCharacterIds().isEmpty()) {
+                scene.setCharacterIds(scene.getCharacterIds().stream()
+                        .map(cid -> idMap.getOrDefault(cid, cid))
+                        .collect(Collectors.toList()));
+            }
+            if (scene.getDialogues() != null) {
+                for (Dialogue d : scene.getDialogues()) {
+                    d.setCharacterId(remapCharacterId(d.getCharacterId(), idMap, hasRemap, validIds));
+                }
+            }
+            if (scene.getActions() != null) {
+                for (Action a : scene.getActions()) {
+                    a.setCharacterId(remapCharacterId(a.getCharacterId(), idMap, hasRemap, validIds));
+                }
+            }
+        }
+    }
+
+    private static Long remapCharacterId(Long id, Map<Long, Long> idMap,
+                                         boolean hasRemap, Set<Long> validIds) {
+        if (id == null) return null;
+        long result = id;
+        if (hasRemap) result = idMap.getOrDefault(id, id);
+        if (validIds != null && !validIds.contains(result)) {
+            log.warn("对白/动作的 characterId={} 不对应任何已入库角色，置空处理（说话人名字保留，不编造归属）", result);
+            return null;
+        }
+        return result;
+    }
+
+    private static Set<Long> validCharacterIds(List<Character> characters) {
+        if (characters == null) return Set.of();
+        return characters.stream()
+                .map(Character::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
 
     private void updateStep(Script script, WorkflowStep step) {
         script.getWorkflowState().put("currentStep", step.name());

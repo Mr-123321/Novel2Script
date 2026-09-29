@@ -251,9 +251,9 @@ public class ScriptService {
     }
 
     @Transactional
-    public void updateCharacters(Long scriptId, List<Character> characters) {
+    public Map<Long, Long> updateCharacters(Long scriptId, List<Character> characters) {
         Script script = scriptMapper.selectById(scriptId);
-        if (script == null) return;
+        if (script == null) return Map.of();
 
         // Build old-id → new-id mapping for remapping scene references
         Map<Long, Long> oldToNewIds = new LinkedHashMap<>();
@@ -296,6 +296,11 @@ public class ScriptService {
         script.setCharacterCount(characters.size());
         script.setUpdatedAt(now);
         scriptMapper.updateById(script);
+
+        // W18: 返回 old→new ID 映射，供调用方重映射内存中对白/动作/场景的
+        // characterId 引用（引擎编排下这些引用在落库前就已定值，
+        // 不重映射会触发 fk_dialogues_character 外键违约）
+        return Collections.unmodifiableMap(oldToNewIds);
     }
 
     @Transactional
