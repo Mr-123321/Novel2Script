@@ -113,6 +113,33 @@ public class ScriptController {
                 });
     }
 
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "取消正在进行的剧本生成，删除剧本并级联清理全部生成数据")
+    public ResponseEntity<Object> cancelGeneration(@PathVariable Long id) {
+        Script script = scriptService.findById(id).orElse(null);
+        if (script == null) {
+            Map<String, Object> notFound = new LinkedHashMap<>();
+            notFound.put("code", 404);
+            notFound.put("message", "剧本不存在: id=" + id);
+            return ResponseEntity.status(404).body(notFound);
+        }
+        if (script.getStatus() != ScriptStatus.GENERATING) {
+            Map<String, Object> conflict = new LinkedHashMap<>();
+            conflict.put("code", 409);
+            conflict.put("message", "剧本不在生成中，无需取消（当前状态: "
+                    + script.getStatus() + "）");
+            return ResponseEntity.status(409).body(conflict);
+        }
+
+        scriptService.requestCancelGeneration(id);
+        log.info("Generation cancelled via API: scriptId={}", id);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("message", "生成已取消，相关数据已清理");
+        resp.put("scriptId", id);
+        return ResponseEntity.ok(resp);
+    }
+
     @GetMapping(value = "/{id}/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "SSE 实时推送剧本生成进度")
     public SseEmitter streamProgress(@PathVariable Long id) {

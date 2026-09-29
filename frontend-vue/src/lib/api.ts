@@ -98,6 +98,11 @@ export function deleteScript(id: number): Promise<{ message: string }> {
   return request(`/scripts/${id}`, { method: 'DELETE' });
 }
 
+/** Cancel an in-progress generation — deletes the script and cascades away all partial data */
+export function cancelGeneration(id: number): Promise<{ message: string }> {
+  return request(`/scripts/${id}/cancel`, { method: 'POST' });
+}
+
 // ==================== Exports (YAML) ====================
 
 /** Get script YAML content — backend at /api/v1/exports/{id}/yaml */

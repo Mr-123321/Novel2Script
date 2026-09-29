@@ -115,6 +115,8 @@ public class GenerationOrchestrator {
                 scriptService.markFailed(scriptId);
             } finally {
                 runningGenerations.remove(scriptId);
+                // W17: 清理取消标记（防内存泄漏；正常完成/失败/取消三条路径都经过这里）
+                scriptService.clearCancellationFlag(scriptId);
             }
         });
     }
@@ -322,6 +324,13 @@ public class GenerationOrchestrator {
         // "并行执行"名存实亡。本方法已运行在 launchGeneration 的 executor
         // 线程上，join() 不会阻塞 HTTP 请求线程。
         String execId = workflowEngine.execute(wf).join();
+
+        // W17: 用户在生成期间取消 → 剧本已删、脏数据已级联清理，直接终止，
+        // 不再对已删除的剧本做任何落库（各写方法虽有 null 守卫，此处显式短路）
+        if (scriptService.isGenerationCancelled(scriptId)) {
+            log.info("Pipeline aborted: scriptId={} cancelled by user during generation", scriptId);
+            return;
+        }
 
         // WorkflowProgress 是纯 record（无 isFailed()）；W10-defect-C 之后
         // stepStatuses 含 FAILED 即整体失败的权威信号（引擎据此 markFailed）

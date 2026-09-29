@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -497,6 +498,46 @@ public class ScriptService {
         // DB cascade handles all child tables
         scriptMapper.deleteById(scriptId);
         log.info("Script deleted: id={}, title='{}'", scriptId, script.getTitle());
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  Generation cancellation (W17)
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * 用户取消生成登记表（scriptId → 已取消）。
+     * 取消 = 删除剧本（DB 级联清理全部脏数据）+ 通知运行中的工作流尽快中止，
+     * 避免后续步骤继续消耗 AI 调用。
+     */
+    private final Set<Long> cancelledGenerations = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 取消正在进行的生成：登记取消标记并删除剧本。
+     *
+     * <p>脏数据清理：scripts 行删除后，V1 迁移的 {@code ON DELETE CASCADE}
+     * 外键级联清空 characters / plot_events / scenes / script_characters /
+     * dialogues / actions / plot_insertions 全部子表。
+     *
+     * <p>防僵尸写回：后台流水线后续的 {@code update*} 写方法均为
+     * {@code selectById → null → return} 守卫（updateById 是 UPDATE 非
+     * UPSERT），剧本行删除后全部退化为 no-op，不会复活已清理的数据。
+     */
+    @Transactional
+    public void requestCancelGeneration(Long scriptId) {
+        if (scriptId == null) return;
+        cancelledGenerations.add(scriptId);
+        deleteScript(scriptId);
+        log.info("Generation cancelled by user: scriptId={} — partial data purged", scriptId);
+    }
+
+    /** 工作流步骤入口的取消检查（WorkflowDefinitions 每步调用）。 */
+    public boolean isGenerationCancelled(Long scriptId) {
+        return scriptId != null && cancelledGenerations.contains(scriptId);
+    }
+
+    /** 流水线结束时清理取消标记（防内存泄漏），由 GenerationOrchestrator 在 finally 调用。 */
+    public void clearCancellationFlag(Long scriptId) {
+        if (scriptId != null) cancelledGenerations.remove(scriptId);
     }
 
     // ─────────────────────────────────────────────────────

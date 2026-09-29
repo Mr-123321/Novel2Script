@@ -143,6 +143,7 @@ public class WorkflowDefinitions {
 
     /** CHAPTER_PARSE: 章节在上传时已由 ChapterParser 解析入库，此处取用并校验。 */
     private void chapterParse(GenerationContext ctx) {
+        ensureNotCancelled(ctx);
         Novel novel = ctx.getNovel();
         if (novel == null) {
             throw new IllegalStateException("GenerationContext.novel is null — cannot parse chapters");
@@ -160,6 +161,7 @@ public class WorkflowDefinitions {
 
     /** CHARACTER_EXTRACT: AI 角色提取。空结果抛异常触发重试。 */
     private void characterExtract(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<String> focusCharacters = ctx.getAttribute("focusCharacters");
         List<CharacterExtractionResult> results =
                 agents.characterAgent().extract(ctx.getChapters(),
@@ -174,6 +176,7 @@ public class WorkflowDefinitions {
 
     /** CHARACTER_RESOLVE: 角色消歧；失败降级用原始提取结果（与主链路一致，不编造）。 */
     private void characterResolve(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<CharacterExtractionResult> raw = ctx.getRawCharacters();
         List<Character> characters;
         try {
@@ -198,6 +201,7 @@ public class WorkflowDefinitions {
 
     /** PLOT_EXTRACT: 情节提取（辅助上下文，允许为空但异常会触发重试）。 */
     private void plotExtract(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<PlotEvent> events = agents.plotExtractionAgent()
                 .extract(ctx.getChapters(), ctx.getCharacters());
         ctx.setPlotEvents(events);
@@ -207,6 +211,7 @@ public class WorkflowDefinitions {
 
     /** SCENE_SEGMENT: 场景切分 + ID 分配 + 初始化对白/动作空列表。 */
     private void sceneSegment(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<Scene> scenes = agents.sceneAgent()
                 .segment(ctx.getChapters(), ctx.getPlotEvents(), ctx.getCharacters());
         if (scenes == null || scenes.isEmpty()) {
@@ -235,6 +240,7 @@ public class WorkflowDefinitions {
      * 而是显式 {@code GenerationStatus.FAILED} + ctx 失败计数如实承载。
      */
     private void dialogueGenerate(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<Scene> scenes = ctx.getScenes();
         List<Character> characters = ctx.getCharacters();
 
@@ -312,6 +318,7 @@ public class WorkflowDefinitions {
      * 与 DIALOGUE_GENERATE 并行执行，Scene 突变同样 {@code synchronized (scene)}。
      */
     private void actionGenerate(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         List<Scene> scenes = ctx.getScenes();
         List<Character> characters = ctx.getCharacters();
         List<Dialogue> allDialogues = flattenDialogues(scenes);
@@ -363,6 +370,7 @@ public class WorkflowDefinitions {
 
     /** SCRIPT_COMPOSE: 聚合全部产出合成剧本，结果挂到 ctx attributes。 */
     private void scriptCompose(GenerationContext ctx, AgentBundle agents) {
+        ensureNotCancelled(ctx);
         Novel novel = ctx.getNovel();
         CompositionInput input = new CompositionInput(
                 novel != null ? novel.getId() : null,
@@ -389,6 +397,7 @@ public class WorkflowDefinitions {
 
     /** YAML_EXPORT: 导出合成剧本为 YAML，挂到 ctx attributes。 */
     private void yamlExport(GenerationContext ctx) {
+        ensureNotCancelled(ctx);
         Script composed = ctx.getAttribute("composedScript");
         if (composed == null) {
             throw new IllegalStateException("无可导出的剧本（SCRIPT_COMPOSE 未产出 composedScript）");
@@ -402,6 +411,20 @@ public class WorkflowDefinitions {
     // ═══════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════
+
+    /**
+     * W17: 用户取消生成检查 —— 每个步骤入口调用。取消后（剧本已删、标记已登记）
+     * 立即抛出中止本步骤，不再消耗 AI 调用；引擎重试耗尽后整体 FAILED，
+     * 流水线终止，后续写回因剧本行已删除全部为 no-op。
+     *
+     * <p>scriptService 为 null 时（单测直连构造，见 WorkflowEngineTest）跳过检查。
+     */
+    private void ensureNotCancelled(GenerationContext ctx) {
+        if (scriptService != null && scriptService.isGenerationCancelled(ctx.getScriptId())) {
+            throw new java.util.concurrent.CancellationException(
+                    "用户已取消生成（scriptId=" + ctx.getScriptId() + "）");
+        }
+    }
 
     /** Per-execution monotonic progress guard (stored in ctx attributes). */
     private static final String MAX_PROGRESS_KEY = "maxProgressPct";

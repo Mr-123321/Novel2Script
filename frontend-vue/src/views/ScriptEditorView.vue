@@ -2,12 +2,40 @@
   <div class="editor-page">
     <!-- Generation progress overlay -->
     <div v-if="showProgressOverlay" class="progress-overlay">
-      <InkProgress
-        v-if="!generationError"
-        :percent="displayProgress"
-        :message="statusText"
-      />
+      <div class="progress-panel">
+        <InkProgress
+          v-if="!generationError"
+          :percent="displayProgress"
+          :message="statusText"
+        />
+        <button
+          class="cancel-gen-btn"
+          :disabled="cancelling"
+          @click="showCancelModal = true"
+        >
+          ✕ 取消生成
+        </button>
+      </div>
     </div>
+
+    <!-- Cancel confirmation modal -->
+    <Teleport to="body">
+      <div v-if="showCancelModal" class="modal-overlay" @click.self="showCancelModal = false">
+        <div class="modal-box">
+          <div class="modal-icon">🗑️</div>
+          <h3 class="modal-title">确认取消生成</h3>
+          <p class="modal-body">
+            取消后将中止本次生成任务，<br />并删除数据库中的未完成数据。<br />此操作不可撤销。
+          </p>
+          <div class="modal-actions">
+            <button class="modal-btn modal-btn--cancel" @click="showCancelModal = false">继续生成</button>
+            <button class="modal-btn modal-btn--danger" :disabled="cancelling" @click="handleCancelGeneration">
+              {{ cancelling ? '正在取消…' : '确认取消' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Completed-with-warnings banner (finished, but some scenes are 待补全) -->
     <div v-if="!generationError && script?.status === 'COMPLETED_WITH_WARNINGS'" class="warnings-banner">
@@ -54,15 +82,17 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useScriptStore } from '@/stores/script'
 import { useSse } from '@/composables/useSse'
-import { getScript } from '@/lib/api'
+import { getScript, cancelGeneration } from '@/lib/api'
+import { toast } from '@/stores/toast'
 import { openPendingScenes } from '@/lib/generationStatus'
 import ScriptEditor from '@/components/script/ScriptEditor.vue'
 import InkProgress from '@/components/InkProgress.vue'
 
 const route = useRoute()
+const router = useRouter()
 const scriptId = Number(route.params.id)
 const store = useScriptStore()
 
@@ -71,6 +101,28 @@ const displayProgress = ref(0)
 const progressVisible = ref(true)
 const startTime = ref(Date.now())
 const resolved = ref(false)
+
+// W17: 取消生成
+const showCancelModal = ref(false)
+const cancelling = ref(false)
+
+async function handleCancelGeneration() {
+  if (cancelling.value) return
+  cancelling.value = true
+  try {
+    await cancelGeneration(scriptId)
+    resolved.value = true
+    stopProgressSimulation()
+    toast.success('已取消生成，未完成数据已清理')
+    router.push('/')
+  } catch (err: unknown) {
+    const detail = (err as { detail?: string }).detail
+    toast.error(detail ?? '取消失败，请重试')
+  } finally {
+    cancelling.value = false
+    showCancelModal.value = false
+  }
+}
 
 const TOTAL_SEC = 240
 const CAP = 95
@@ -313,5 +365,131 @@ const showProgressOverlay = computed(() =>
 
 .banner-action:hover {
   background: rgba(194, 59, 34, 0.25);
+}
+
+/* ── W17: 取消生成 ── */
+.progress-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.cancel-gen-btn {
+  padding: 8px 22px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.cancel-gen-btn:hover:not(:disabled) {
+  background: var(--cinnabar-surface);
+  border-color: rgba(194, 59, 34, 0.3);
+  color: var(--cinnabar);
+}
+
+.cancel-gen-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 取消确认弹窗 — 与首页删除确认同款视觉语言 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  animation: modalFadeIn 0.2s ease;
+}
+
+.modal-box {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: var(--shadow-float);
+  animation: modalScaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.modal-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.modal-title {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.modal-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-btn {
+  padding: 8px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.modal-btn--cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.modal-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.modal-btn--danger {
+  background: var(--cinnabar);
+  color: #fff;
+}
+
+.modal-btn--danger:hover:not(:disabled) {
+  background: #d44a2a;
+  box-shadow: 0 0 16px rgba(194, 59, 34, 0.4);
+}
+
+.modal-btn--danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
 </style>
