@@ -196,6 +196,17 @@ public class CharacterResolverAgent {
         //    e.g., "小川" ↔ "林川" (if base name matches)
         if (isAliasPattern(n1, n2)) return true;
 
+        // 1a. "老+姓" address form vs same-surname full name
+        //     e.g., "老王" ↔ "王明". Restricted to the "老" prefix:
+        //     "小+单字" is usually a given-name address (e.g., "小明"),
+        //     so it must NOT merge with a full name merely sharing that char.
+        if (isLaoSurnameAddress(n1, n2) || isLaoSurnameAddress(n2, n1)) return true;
+
+        // 1b. "姓+称谓" title form vs same-surname full name
+        //     e.g., "林师兄" ↔ "林川": stripping the title leaves a single
+        //     char that equals the other name's surname.
+        if (isSurnameTitleOf(n1, n2) || isSurnameTitleOf(n2, n1)) return true;
+
         // 2. Suffix-stripped base names match
         //    e.g., "川哥" ↔ "林川" (base = "川" matches given name "川")
         String base1 = extractBaseName(n1);
@@ -308,6 +319,31 @@ public class CharacterResolverAgent {
             s2 = n2.length() >= 2 ? n2.charAt(1) : s2;
         }
         return s1 == s2;
+    }
+
+    /**
+     * Check the "老+姓" address form: a 2-char name starting with "老"
+     * whose second char equals the other name's surname.
+     * e.g., "老王" ↔ "王明".
+     */
+    private static boolean isLaoSurnameAddress(String address, String fullName) {
+        if (address.length() != 2 || fullName.length() < 2) return false;
+        if (!address.startsWith("老")) return false;
+        return address.charAt(1) == fullName.charAt(0);
+    }
+
+    /**
+     * Check the "姓+称谓" title form: stripping an honorific suffix from
+     * {@code title} leaves a single character (the surname) that equals the
+     * other name's surname. Requires that a suffix was actually stripped,
+     * so plain full names never match here.
+     * e.g., "林师兄" ↔ "林川".
+     */
+    private static boolean isSurnameTitleOf(String title, String fullName) {
+        if (fullName.length() < 2) return false;
+        String base = extractBaseName(title);
+        if (base.equals(title) || base.length() != 1) return false;
+        return base.charAt(0) == fullName.charAt(0);
     }
 
     /**

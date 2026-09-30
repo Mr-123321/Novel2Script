@@ -174,11 +174,12 @@ cd backend
 | W07 | README 与实现对齐：移除"双重生成模式/自动回退"失实宣传，新增单次 AI 调用的「负结果」分析 | ✅ `c1c5895` |
 | W08 | 长文本分块管线（processor 三件套）标注为已实现未接入的预留模块，README 新增第 6 节 | ✅ `c1e5e81` |
 | W09 | `MilvusVectorStore` → `InMemoryVectorStore` 纯改名，澄清"已部署 Milvus 集群"的命名误导 | ✅ `b76f64e` |
+| W19 | 修复 `CharacterResolverAgent` 姓氏称谓匹配缺陷：新增「老+姓」「姓+称谓」与同姓全名的保守匹配规则 | ✅ 已修复 |
 
 **阶段收尾时的如实声明**：
 - 已消除的失真：虚构的"模式选择入口"、"双重生成/自动回退"宣传、`ExportService` 引用、"Milvus 已部署"暗示、无中生有的 50 万字性能宣传；
 - 仍属"已实现未接入"并已在第 6 节如实标注的模块：长文本分块管线、工作流引擎；
-- 遗留已知问题：`CharacterResolverAgentTest` 3 例姓氏称谓分组断言失败（main 既有缺陷，与治理改动无关，待后续工单处理）。
+- 已知问题清零：`CharacterResolverAgentTest` 原 3 例姓氏称谓分组断言失败已修复（根因：「老+姓」「姓+称谓」与单字基名在姓氏位的命中被保守拒绝，且缺少对应补偿规则），修复后 `novel2script-application` 模块全量 334 例测试通过、零失败。
 
 ---
 
